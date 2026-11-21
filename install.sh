@@ -4,7 +4,7 @@ set -Eeuo pipefail
 umask 022
 [[ "$EUID" -eq 0 ]] || { echo 'FAIL: run as root' >&2; exit 1; }
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-for name in manager.sh bootstrap.sh ui.sh locale.sh; do
+for name in manager.sh bootstrap.sh ui.sh locale.sh status.sh; do
   [[ -f "$source_dir/$name" && ! -L "$source_dir/$name" ]] || { echo "FAIL: missing $name" >&2; exit 1; }
   bash -n "$source_dir/$name"
 done
@@ -17,6 +17,7 @@ install -m 0755 "$source_dir/manager.sh" "$stage/manager.sh"
 install -m 0755 "$source_dir/bootstrap.sh" "$stage/bootstrap.sh"
 install -m 0644 "$source_dir/ui.sh" "$stage/ui.sh"
 install -m 0644 "$source_dir/locale.sh" "$stage/locale.sh"
+install -m 0644 "$source_dir/status.sh" "$stage/status.sh"
 revision=${RFS_SOURCE_SHA:-local}
 channel=${RFS_SOURCE_CHANNEL:-local}
 case "$revision" in
@@ -27,7 +28,7 @@ case "$channel" in dev|main|local) ;; *) echo 'FAIL: invalid channel' >&2; exit 
 printf '%s\n' "$revision" > "$stage/revision"
 printf '%s\n' "$channel" > "$stage/channel"
 # Existing scanner binaries, reports and user configuration remain unchanged.
-for name in manager.sh bootstrap.sh ui.sh locale.sh revision channel; do
+for name in manager.sh bootstrap.sh ui.sh locale.sh status.sh revision channel; do
   mv -f -- "$stage/$name" "$app/$name"
 done
 # Language selection on first install only; read from controlling TTY even with curl | bash.

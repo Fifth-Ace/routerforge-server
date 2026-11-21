@@ -19,3 +19,5 @@
 
 - P10: no-flicker incremental TLS TUI, 30-line history, GeoIP column, RU default / EN secondary, language selection on install and in menu, RU README and EN README.
 - P10: RouterForge shared README banner and user-supplied terminal screenshot; resilient idle prompt handling.
+
+- P11: read-only VPS status dashboard with load-first CPU, memory, swap, disk, network, system, and SSH/UFW overview (RU/EN).

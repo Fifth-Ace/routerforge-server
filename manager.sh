@@ -25,11 +25,12 @@ confirm(){
 }
 port_listeners(){ ss -H -ltnp 2>/dev/null | grep -E ':(22|222|2202)([[:space:]]|$)' || true; }
 status(){
- rfs_heading 'PRECHECK / READ ONLY'; printf 'RFS_VERSION: %s\n' "$VERSION"; sed -n 's/^PRETTY_NAME=/OS: /p' /etc/os-release || true
- rfs_heading SSH; /usr/sbin/sshd -T 2>/dev/null | awk '$1=="port"{print}' || true; port_listeners
- rfs_heading UFW; if command -v ufw >/dev/null; then ufw status verbose; else info 'UFW: missing'; fi
- rfs_heading NETWORK; ip -4 route show default || true
- rfs_heading RESULT; info 'STATE: PASS / NO CHANGES'
+ # P11: load-first read-only VPS dashboard, no package/service mutations.
+ local dashboard="$RFS_SELF_DIR/status.sh"
+ [[ -r "$APP_DIR/status.sh" ]] && dashboard="$APP_DIR/status.sh"
+ [[ -r "$dashboard" ]] || { die 'status.sh missing'; return 1; }
+ source "$dashboard"
+ rfs_server_status
 }
 updates(){ root || return 1; ubuntu || return 1; rfs_heading 'PRECHECK / APT'; confirm 'Выполнить apt update + upgrade без вопросов?' || { info 'CANCELLED'; return; }; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l; apt-get update && apt-get -y -o Dpkg::Options::=--force-confold upgrade; rfs_heading RESULT; info 'APT: PASS'; }
 ssh_prepare(){

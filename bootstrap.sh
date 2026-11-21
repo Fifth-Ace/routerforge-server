@@ -47,7 +47,7 @@ tar -tzf "$tmp/source.tar.gz" >/dev/null
 mkdir "$tmp/source"
 tar -xzf "$tmp/source.tar.gz" --strip-components=1 -C "$tmp/source" \
   --no-same-owner --no-same-permissions
-for name in install.sh manager.sh bootstrap.sh ui.sh locale.sh; do
+for name in install.sh manager.sh bootstrap.sh ui.sh locale.sh status.sh; do
   [[ -f "$tmp/source/$name" && ! -L "$tmp/source/$name" ]] || { echo "FAIL: $name missing" >&2; exit 1; }
   bash -n "$tmp/source/$name"
 done

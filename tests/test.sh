@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
-for f in manager.sh install.sh bootstrap.sh ui.sh; do bash -n "$f"; done
+for f in manager.sh install.sh bootstrap.sh ui.sh locale.sh status.sh; do bash -n "$f"; done
 for cmd in help version; do bash manager.sh "$cmd" >/dev/null; done
 D=$(mktemp -d); trap 'rm -rf "$D"' EXIT
 cat > "$D/test.csv" <<'CSV'
@@ -195,3 +195,18 @@ grep -q 'rf-server-terminal.png' README.md
 grep -q 'rf-server-terminal.png' README.en.md
 [[ -s docs/assets/rf-server-terminal.png ]]
 printf 'P10_README_BRAND_IDLE: PASS\n'
+
+
+# P11: read-only host dashboard; load is displayed before system details.
+grep -q 'rfs_server_status' manager.sh
+grep -q 'status.sh' install.sh
+grep -q 'status.sh' bootstrap.sh
+status_output=$(RFS_LANG=ru bash status.sh)
+grep -q 'НАГРУЗКА СЕРВЕРА' <<< "$status_output"
+grep -q 'ИНФОРМАЦИЯ О СЕРВЕРЕ' <<< "$status_output"
+grep -q 'Сеть RX/TX:' <<< "$status_output"
+grep -q 'SECURITY: UNTOUCHED' <<< "$status_output"
+status_en=$(RFS_LANG=en bash status.sh)
+grep -q 'SERVER LOAD' <<< "$status_en"
+grep -q 'SERVER INFORMATION' <<< "$status_en"
+printf 'P11_STATUS_DASHBOARD: PASS\n'
