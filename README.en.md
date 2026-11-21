@@ -4,16 +4,14 @@
 
 # RF Server / RouterForge Server
 
-**Ubuntu VPS management CLI · TLS diagnostics · service installers**
+**Linux server CLI manager · monitoring · TLS diagnostics · security**
 
 [🇷🇺 Русский](README.md) · [🇬🇧 English](README.en.md)
 
-[![DEV](https://img.shields.io/badge/channel-dev-38bdf8?style=flat-square)](https://github.com/Fifth-Ace/routerforge-server/tree/dev)
+[![Stable](https://img.shields.io/badge/release-v1.0.0-38bdf8?style=flat-square)](https://github.com/Fifth-Ace/routerforge-server/releases/tag/v1.0.0)
 [![CI](https://img.shields.io/github/actions/workflow/status/Fifth-Ace/routerforge-server/verify.yml?branch=dev&style=flat-square&label=Verify)](https://github.com/Fifth-Ace/routerforge-server/actions/workflows/verify.yml)
 
 </div>
-
-> **Project status:** development and the installer live on the [`dev` branch](https://github.com/Fifth-Ace/routerforge-server/tree/dev). The `main` branch does not yet contain a stable installer.
 
 ## Terminal interface
 
@@ -21,7 +19,7 @@
 
 **English documentation.** [Основная документация на русском](README.md)
 
-RouterForge Server is a standalone Ubuntu VPS management CLI. The `dev` branch contains work in progress; `main` is reserved for a separately promoted stable release.
+RouterForge Server is a terminal-based Linux server management tool. Stable releases are published from `main`; development continues in `dev`. Tested on Ubuntu 24.04 LTS (amd64); other distributions have not yet been verified, and some features depend on APT and UFW.
 
 ## Features
 
@@ -33,13 +31,13 @@ RouterForge Server is a standalone Ubuntu VPS management CLI. The `dev` branch c
 - Optional third-party installers: classic 3x-ui, LucX-UI, RKN Guard, and MTProxyL. Existing x-ui installations are protected against automatic replacement.
 - Update checks and user-confirmed self-updates. No unattended update installation.
 
-## Installation (dev)
+## Install stable version 1.0.0
 
 Download and inspect the bootstrap before running it as root:
 
 ```bash
-curl -fsSLo /tmp/rfs-bootstrap.sh https://raw.githubusercontent.com/Fifth-Ace/routerforge-server/dev/bootstrap.sh
-sudo bash /tmp/rfs-bootstrap.sh --channel=dev --install
+curl -fsSLo /tmp/rfs-bootstrap.sh https://raw.githubusercontent.com/Fifth-Ace/routerforge-server/v1.0.0/bootstrap.sh
+sudo bash /tmp/rfs-bootstrap.sh --channel=main --install
 rfs
 ```
 
