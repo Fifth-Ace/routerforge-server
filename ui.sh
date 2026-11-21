@@ -97,7 +97,7 @@ rfs_menu(){
   trap 'exit 130' INT
   trap 'exit 143' TERM
   rfs_terminal_on
-  local choice rc
+  local choice rc before_revision after_revision request_reexec=0
   rfs_update_refresh 1
   while :; do
    rfs_update_refresh
@@ -127,7 +127,19 @@ rfs_menu(){
     1) status || true;; 2) updates || true;; 3) ssh_prepare || true;;
     4) ufw_status || true;; 5) ufw_ssh || true;; 6) ufw_icmp || true;;
     7) scanner_install || true;; 8) scanner_run || true;; 9) reports || true;;
-    10) self_update || true;;
+    10)
+      before_revision=$(cat "$APP_DIR/revision" 2>/dev/null || printf 'unknown')
+      if self_update; then
+        after_revision=$(cat "$APP_DIR/revision" 2>/dev/null || printf 'unknown')
+        if [[ "$after_revision" =~ ^[a-f0-9]{40}$ && "$after_revision" != "$before_revision" ]]; then
+          info "RFS_RESTART: $before_revision -> $after_revision"
+          request_reexec=1
+          break
+        fi
+      else
+        info 'RFS_UPDATE: FAILED / current menu remains active'
+      fi
+      ;;
     15) rfs_update_refresh 1; rfs_update_display;;
     11) rfs_install_third_party 3x-ui || true;;
     12) rfs_install_third_party lucx-ui || true;;
@@ -137,6 +149,9 @@ rfs_menu(){
    esac
    rfs_pause
   done
+  # Return a distinct status after alternate-screen EXIT cleanup.
+  # Parent shell execs fresh code instead of reusing previously sourced functions.
+  if [[ "$request_reexec" == 1 ]]; then return 75; fi
  )
 }
 
@@ -191,4 +206,15 @@ rfs_install_third_party(){
  return "$rc"
 }
 # Preserve the existing CLI name for compatibility, replace only interactive menu.
-menu(){ rfs_menu; }
+menu(){
+ local result=0
+ rfs_menu || result=$?
+ if (( result == 75 )); then
+   if [[ -x "$APP_DIR/manager.sh" ]]; then
+     exec "$APP_DIR/manager.sh" menu
+   fi
+   die 'Installed RFS entrypoint missing after update'
+   return 1
+ fi
+ return "$result"
+}

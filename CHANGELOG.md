@@ -14,3 +14,4 @@
 - P7: automatic five-minute read-only update check with installed and available version/revision comparison in the main TUI.
 
 - P8: live RealiTLScanner log tail, deadline countdown, and Ctrl+C cleanup.
+- P8 v2: restart RFS UI immediately after verified successful self-update, preserving SSH session.

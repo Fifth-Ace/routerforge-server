@@ -121,3 +121,32 @@ grep -q 'tail -n 10' manager.sh
 grep -q 'trap - INT TERM EXIT' manager.sh
 grep -q 'scanner.log' manager.sh
 printf 'P8_LIVE_PROGRESS_STATIC: PASS\n'
+
+# P8 v2: successful self-update must hand off to a fresh process.
+grep -q 'request_reexec=1' ui.sh
+grep -q 'exec "$APP_DIR/manager.sh" menu' ui.sh
+# Isolated menu simulation, no root, no network, no installed service changes.
+mkdir -p "$D/app"
+printf '%040d\n' 1 > "$D/app/revision"
+cat > "$D/restart-fixture.sh" <<'MOCK'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+head -n -1 "$1" > "$2/manager-lib.sh"
+source "$2/manager-lib.sh"
+APP_DIR="$2/app"
+source ./ui.sh
+rfs_terminal_on(){ RFS_TUI_ACTIVE=0; }
+rfs_update_refresh(){ :; }
+rfs_draw_menu(){ :; }
+rfs_redraw(){ :; }
+rfs_banner(){ :; }
+rfs_line(){ :; }
+rfs_pause(){ :; }
+self_update(){ printf '%040d\n' 2 > "$APP_DIR/revision"; }
+result=0
+rfs_menu || result=$?
+[[ $result == 75 ]] || { echo "RESTART_EXPECTED_75_GOT_$result"; exit 1; }
+MOCK
+# Avoid starting any app: test only the subshell restart signal.
+printf '10\n' | bash "$D/restart-fixture.sh" "$PWD/manager.sh" "$D" >/dev/null
+printf 'P8_SELF_UPDATE_REEXEC: PASS\n'

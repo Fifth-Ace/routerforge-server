@@ -80,3 +80,7 @@ The P6 banner uses built-in 7-row block letters “RF SERVER” with optional AN
 - While the scanner runs, the terminal shows elapsed time, remaining seconds, a progress bar and the last ten log lines. The countdown is a **time-limit countdown**, not a measure of scan completion.
 - The full raw output is preserved in each report's `scanner.log`; `scope.txt`, CSV filtering and selected IP/time are unchanged.
 - Ctrl+C requests a stop; interactive rendering uses the existing terminal screen without continuously scrolling. Non-TTY runs print sparse progress lines.
+
+## P8 v2: in-process update handoff
+
+After a successful RFS update changes the installed revision, the menu restores the terminal and uses `exec /opt/routerforge-server/manager.sh menu` to start the new code in the same SSH session. Cancelled/failed/no-change updates keep the old menu open.
