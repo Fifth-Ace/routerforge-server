@@ -113,3 +113,11 @@ main_output=$(printf '\n' | NO_COLOR=1 bash manager.sh menu)
 ! grep -q 'Неизвестный пункт' <<< "$main_output"
 grep -q 'choice=${choice:-0}' ui.sh
 printf 'P7_DEFAULT_EXIT: PASS\n'
+
+# P8: progress countdown and log tail invariants (read-only mock).
+grep -q 'rfs_scan_render' manager.sh
+grep -q 'ПОСЛЕДНИЕ СООБЩЕНИЯ СКАНЕРА' manager.sh
+grep -q 'tail -n 10' manager.sh
+grep -q 'trap - INT TERM EXIT' manager.sh
+grep -q 'scanner.log' manager.sh
+printf 'P8_LIVE_PROGRESS_STATIC: PASS\n'

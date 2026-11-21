@@ -230,40 +230,105 @@ scanner_select_seconds(){
    info 'Укажите целое число секунд от 1 до 86400.'
  done
 }
-scanner_run(){
- root || return 1; [[ -x "$APP_DIR/bin/RealiTLScanner" ]] || { die 'Install scanner first'; return 1; }
- command -v timeout >/dev/null || { die 'timeout missing'; return 1; }
- local cidr stamp report rc=0 SCAN_SELECTED_IP= SCAN_SELECTED_SECONDS=
+# P8: Follow scanner.log while running, with a live countdown.
+# The full log is always written to the report, regardless of terminal capabilities.
+rfs_scan_render(){
+ local start=$1 duration=$2 log=$3 network=$4 source_ip=$5 worker=$6 final=${7:-0}
+ local elapsed remaining width=24 filled empty bar count now tailtext
+ now=$(date +%s)
+ elapsed=$((now-start)); ((elapsed<0)) && elapsed=0
+ remaining=$((duration-elapsed)); ((remaining<0)) && remaining=0
+ filled=$((elapsed*width/duration)); ((filled>width)) && filled=$width
+ empty=$((width-filled))
+ printf -v bar '%*s' "$filled" ''; bar=${bar// /█}
+ printf -v tailtext '%*s' "$empty" ''; tailtext=${tailtext// /░}
+ if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
+   printf '\033[H\033[2J'
+   if [[ -z "${NO_COLOR:-}" ]]; then
+     printf '\033[1;96m RF SERVER / TLS SCANNER\033[0m\n'
+   else
+     printf ' RF SERVER / TLS SCANNER\n'
+   fi
+ else
+   printf '\n=== RF SERVER / TLS SCANNER ===\n'
+ fi
+ printf ' Сеть: %s | выбран IP: %s\n' "$network" "$source_ip"
+ printf ' Прошло: %ds | Осталось: %ds | Лимит: %ds\n' "$elapsed" "$remaining" "$duration"
+ printf ' [%s%s] %d%%\n' "$bar" "$tailtext" "$((filled*100/width))"
+ if [[ "$final" == 1 ]]; then
+   printf ' Статус: ЗАВЕРШЕНО\n'
+ elif kill -0 "$worker" 2>/dev/null; then
+   printf ' Статус: СКАНИРОВАНИЕ... (Ctrl+C для остановки)\n'
+ else
+   printf ' Статус: ЗАВЕРШЕНИЕ...\n'
+ fi
+ printf '%s\n' ' ───── ПОСЛЕДНИЕ СООБЩЕНИЯ СКАНЕРА ─────'
+ if [[ -s "$log" ]]; then tail -n 10 "$log"; else printf ' Ожидание сообщений RealiTLScanner...\n'; fi
+ printf '%s\n' ' ────────────────────────────────────────'
+}
+scanner_run(){ (
+ root || exit 1
+ [[ -x "$APP_DIR/bin/RealiTLScanner" ]] || { die 'Install scanner first'; exit 1; }
+ command -v timeout >/dev/null || { die 'timeout missing'; exit 1; }
+ local cidr stamp report rc=0 worker='' start elapsed next_log=0
+ local SCAN_SELECTED_IP= SCAN_SELECTED_SECONDS=
  head 'SCANNER / SCOPE'
- scanner_select_ip || { info 'SCANNER: CANCELLED / no network changes'; return 0; }
- scanner_select_seconds || { info 'SCANNER: CANCELLED'; return 0; }
+ scanner_select_ip || { info 'SCANNER: CANCELLED / no network changes'; exit 0; }
+ scanner_select_seconds || { info 'SCANNER: CANCELLED'; exit 0; }
  cidr=$(python3 - "$SCAN_SELECTED_IP" <<'PYIP'
 import ipaddress,sys
-p=ipaddress.ip_address(sys.argv[1])
-assert p.version==4 and p.is_global,'not global IPv4'
+p=ipaddress.ip_address(sys.argv[1]); assert p.version==4 and p.is_global
 print(ipaddress.ip_network(f'{p}/24',strict=False))
 PYIP
-) || { die 'Cannot calculate public IPv4 network'; return 1; }
+) || { die 'Cannot calculate public IPv4 network'; exit 1; }
  info "SELECTED_VPS_IP: $SCAN_SELECTED_IP"
  info "TARGET_NEIGHBORS: $cidr"
  info "TIME_LIMIT: ${SCAN_SELECTED_SECONDS}s / THREADS: $SCAN_THREADS"
  info 'ATTENTION: selected IP defines /24 scope, NOT outbound source IP.'
  info 'Neighboring addresses may belong to other clients; provider permission is required.'
- confirm "Запустить сканирование $cidr на TCP 443?" || { info CANCELLED; return 0; }
+ confirm "Запустить сканирование $cidr на TCP 443?" || { info CANCELLED; exit 0; }
  mkdir_state
  stamp=$(date -u +%Y%m%dT%H%M%SZ)
  report="$STATE_DIR/reports/${stamp}-${SCAN_SELECTED_IP//./-}"
  install -d -m 0750 "$report"
  printf 'selected_ip=%s\ntarget_cidr=%s\nscan_seconds=%s\n' "$SCAN_SELECTED_IP" "$cidr" "$SCAN_SELECTED_SECONDS" > "$report/scope.txt"
- timeout --signal=INT --kill-after=5 "${SCAN_SELECTED_SECONDS}s" "$APP_DIR/bin/RealiTLScanner" -addr "$cidr" -port 443 -thread "$SCAN_THREADS" -timeout 5 -out "$report/raw.csv" > "$report/scanner.log" 2>&1 || rc=$?
+ : > "$report/scanner.log"
+ timeout --signal=INT --kill-after=5 "${SCAN_SELECTED_SECONDS}s" \
+   "$APP_DIR/bin/RealiTLScanner" -addr "$cidr" -port 443 \
+   -thread "$SCAN_THREADS" -timeout 5 -out "$report/raw.csv" > "$report/scanner.log" 2>&1 &
+ worker=$!
+ # Keep traps inside the scanner subshell; never mutate the main menu's traps.
+ trap '[[ -z "$worker" ]] || { kill -TERM "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; }; exit 130' INT
+ trap '[[ -z "$worker" ]] || { kill -TERM "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; }; exit 143' TERM
+ trap '[[ -z "$worker" ]] || { if kill -0 "$worker" 2>/dev/null; then kill -TERM "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; fi; }' EXIT
+ start=$(date +%s)
+ while kill -0 "$worker" 2>/dev/null; do
+   if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
+     rfs_scan_render "$start" "$SCAN_SELECTED_SECONDS" "$report/scanner.log" "$cidr" "$SCAN_SELECTED_IP" "$worker"
+   else
+     elapsed=$(( $(date +%s) - start ))
+     if (( elapsed >= next_log )); then
+       printf 'SCAN_PROGRESS: elapsed=%ds remaining=%ds\n' "$elapsed" "$((SCAN_SELECTED_SECONDS>elapsed?SCAN_SELECTED_SECONDS-elapsed:0))"
+       tail -n 4 "$report/scanner.log" || true
+       next_log=$((elapsed+10))
+     fi
+   fi
+   sleep 1
+ done
+ if wait "$worker"; then rc=0; else rc=$?; fi
+ worker=''
+ trap - INT TERM EXIT
+ if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
+   rfs_scan_render "$start" "$SCAN_SELECTED_SECONDS" "$report/scanner.log" "$cidr" "$SCAN_SELECTED_IP" 0 1
+ fi
  info "SCANNER_EXIT_CODE: $rc"
  if [[ "$rc" != 0 && "$rc" != 124 && "$rc" != 130 ]]; then
    info 'WARNING: scanner exited unexpectedly; see scanner.log'
  fi
- [[ -f "$report/raw.csv" ]] || { die "Scanner produced no CSV: $report/scanner.log"; return 1; }
+ [[ -f "$report/raw.csv" ]] || { die "Scanner produced no CSV: $report/scanner.log"; exit 1; }
  scanner_filter "$report/raw.csv" "$report/filtered.csv" | tee "$report/summary.txt"
  head RESULT; info "REPORT: $report"; info 'STATE: PASS / REPORT WRITTEN'
-}
+) }
 
 # Read-only update probe. A semantic version alone cannot distinguish dev builds:
 # show both VERSION and the exact installed/available commit identifiers.

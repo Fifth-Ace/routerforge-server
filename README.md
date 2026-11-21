@@ -74,3 +74,9 @@ The P6 banner uses built-in 7-row block letters “RF SERVER” with optional AN
 - Shows `Установлена: 0.1.0-dev (local SHA) → Доступна: 0.1.0-dev (remote SHA)` with green *current* or yellow *update available*. Dev builds share the same semantic version and must be distinguished by commit.
 - For a differing commit, the remote VERSION is fetched from `manager.sh` pinned to that exact commit. If the version file is unavailable, it shows the remote revision without inventing a version.
 - Network failure is displayed as unavailable, not as current. Update installation always requires explicit confirmation.
+
+## P8: live TLS scanner progress
+
+- While the scanner runs, the terminal shows elapsed time, remaining seconds, a progress bar and the last ten log lines. The countdown is a **time-limit countdown**, not a measure of scan completion.
+- The full raw output is preserved in each report's `scanner.log`; `scope.txt`, CSV filtering and selected IP/time are unchanged.
+- Ctrl+C requests a stop; interactive rendering uses the existing terminal screen without continuously scrolling. Non-TTY runs print sparse progress lines.
