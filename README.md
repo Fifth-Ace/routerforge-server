@@ -45,4 +45,18 @@ The previous command `vps-manager` remains available as a compatibility alias.
 
 ## Security boundaries
 
-Do not paste arbitrary `curl | bash` commands to root. Clone the repository or download a pinned release, review/check its SHA256, then install. This proof-of-concept intentionally has no auto-update feature yet.
+Do not paste arbitrary `curl | bash` commands to root. Clone the repository or download a pinned release, review/check its SHA256, then install. Self-update is available via `rfs self-update`; it updates only RouterForge Server program files.
+
+## Installation from GitHub (dev)
+
+Download the bootstrap script, inspect it, then execute. The bootstrap resolves the selected branch to a 40-character commit SHA, downloads source from that exact commit, checks Bash syntax and installs `rfs`.
+
+```bash
+curl -fsSLo /tmp/rfs-bootstrap.sh https://raw.githubusercontent.com/Fifth-Ace/routerforge-server/dev/bootstrap.sh
+sudo bash /tmp/rfs-bootstrap.sh --channel=dev --install
+rfs
+```
+
+To update the installed CLI without touching system services, choose item 10 or run `rfs self-update`. The legacy command `vps-manager` remains available. `main` is not published as a production installer until stable promotion.
+
+GitHub HTTPS and the selected repository branch are the trust root. Pin the bootstrap URL to a reviewed commit for additional reproducibility. A commit SHA is not a signature; independent release signing is future work.

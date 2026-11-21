@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
-bash -n manager.sh install.sh
+for f in manager.sh install.sh bootstrap.sh; do bash -n "$f"; done
 for cmd in help version; do bash manager.sh "$cmd" >/dev/null; done
 D=$(mktemp -d); trap 'rm -rf "$D"' EXIT
 cat > "$D/test.csv" <<'CSV'
@@ -20,3 +20,10 @@ grep -q 'RETAINED: 2' "$D/summary"
 # No side-effect for passive actions.
 bash manager.sh help >/dev/null
 printf 'BASH: PASS\nFILTER: PASS\nDEDUP: PASS\n'
+
+# P3 offline smoke checks: read-only commands and installer source invariants.
+grep -q 'self-update)' manager.sh
+grep -q '/usr/local/bin/rfs' install.sh
+grep -q 'codeload.github.com' bootstrap.sh
+! grep -Eq 'systemctl[[:space:]]+(restart|stop)|ufw[[:space:]]+enable' install.sh bootstrap.sh
+printf 'P3_BOOTSTRAP_STATIC: PASS\n'

@@ -175,6 +175,19 @@ PY
  scanner_filter "$report/raw.csv" "$report/filtered.csv" | tee "$report/summary.txt"
  head RESULT; info "REPORT: $report"; info 'STATE: PASS / REPORT WRITTEN'
 }
+self_update(){
+ root || return 1
+ local channel
+ channel=dev
+ if [[ -f "$APP_DIR/channel" ]]; then channel=$(cat "$APP_DIR/channel"); fi
+ [[ "$channel" == dev || "$channel" == main ]] || { die 'Unknown installed channel. Reinstall from GitHub first'; return 1; }
+ [[ -f "$APP_DIR/bootstrap.sh" ]] || { die 'Bootstrap not installed'; return 1; }
+ head 'UPDATE / ROUTERFORGE SERVER'
+ info "CHANNEL: $channel"
+ info 'Only program files are replaced. SSH, UFW and system services are untouched.'
+ confirm "Обновить RouterForge Server из $channel?" || { info CANCELLED; return 0; }
+ bash "$APP_DIR/bootstrap.sh" --update "--channel=$channel"
+}
 reports(){ head 'REPORTS'; if [[ -d "$STATE_DIR/reports" ]]; then find "$STATE_DIR/reports" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r | head -20; else info 'No reports'; fi; }
 menu(){
  while :; do
@@ -189,6 +202,7 @@ menu(){
   7) RealiTLScanner: установка
   8) RealiTLScanner: соседи IPv4 /24 / 120 секунд
   9) Отчёты
+  10) Обновить RouterForge Server
   0) Выход
 TXT
   local choice; read -r -p 'Выбор: ' choice || break
@@ -196,20 +210,20 @@ TXT
    1) status || true;; 2) updates || true;; 3) ssh_prepare || true;;
    4) ufw_status || true;; 5) ufw_ssh || true;; 6) ufw_icmp || true;;
    7) scanner_install || true;; 8) scanner_run || true;; 9) reports || true;;
-   0) break;; *) info 'Неизвестный пункт';;
+   10) self_update || true;; 0) break;; *) info 'Неизвестный пункт';;
   esac
  done
 }
 help_text(){ cat <<'TXT'
 RouterForge Server
-Usage: vps-manager [menu|status|update|ssh-prepare|ufw-status|ufw-ssh|ufw-icmp|scanner-install|scan|reports|filter CSV OUTPUT]
+Usage: rfs [menu|status|update|ssh-prepare|ufw-status|ufw-ssh|ufw-icmp|scanner-install|scan|reports|self-update|filter CSV OUTPUT]
 No root service is started automatically. No firewall activation or SSH restart.
 TXT
 }
 main(){
  case "${1:-menu}" in
  menu) menu;; status) status;; update) updates;; ssh-prepare) ssh_prepare;; ufw-status) ufw_status;; ufw-ssh) ufw_ssh;; ufw-icmp) ufw_icmp;;
- scanner-install) scanner_install;; scan) scanner_run;; reports) reports;; filter) [[ $# == 3 ]] || { help_text; return 2; }; scanner_filter "$2" "$3";;
+ scanner-install) scanner_install;; scan) scanner_run;; reports) reports;; self-update) self_update;; filter) [[ $# == 3 ]] || { help_text; return 2; }; scanner_filter "$2" "$3";;
  version|--version) echo "$VERSION";; help|--help|-h) help_text;; *) help_text; return 2;;
  esac
 }

@@ -7,3 +7,5 @@
 - Optional UFW ICMP policy with backup and syntax check.
 - RealiTLScanner install and 120-second neighboring IPv4 scan with issuer filtering.
 - Reserved compatibility surface for RouterForge Core/Portal integration.
+
+- P3: pinned-commit GitHub bootstrap, rfs self-update and idempotent installer; no SSH/UFW service actions.
