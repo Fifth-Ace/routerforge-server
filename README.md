@@ -13,6 +13,12 @@ sudo bash install.sh
 vps-manager
 ```
 
+## P4: Color menu and installers
+
+The `rfs` command opens a color-coded menu split into system, security, scanning, third-party services, and maintenance. Third-party installers are downloaded directly from upstream only after confirmation and SHA256 display. Existing x-ui/LucX installations block the classic 3x-ui installer to avoid overwriting a running panel.
+
+Third-party menu entries: MHSanaei/3x-ui, Flecksis/rkn-guard, Liafanx/MTProxyL.
+
 ## What the menu does
 
 - VPS status: read-only.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
-for f in manager.sh install.sh bootstrap.sh; do bash -n "$f"; done
+for f in manager.sh install.sh bootstrap.sh ui.sh; do bash -n "$f"; done
 for cmd in help version; do bash manager.sh "$cmd" >/dev/null; done
 D=$(mktemp -d); trap 'rm -rf "$D"' EXIT
 cat > "$D/test.csv" <<'CSV'

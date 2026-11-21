@@ -4,7 +4,7 @@ set -Eeuo pipefail
 umask 022
 [[ "$EUID" -eq 0 ]] || { echo 'FAIL: run as root' >&2; exit 1; }
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-for name in manager.sh bootstrap.sh; do
+for name in manager.sh bootstrap.sh ui.sh; do
   [[ -f "$source_dir/$name" && ! -L "$source_dir/$name" ]] || { echo "FAIL: missing $name" >&2; exit 1; }
   bash -n "$source_dir/$name"
 done
@@ -15,6 +15,7 @@ stage=$(mktemp -d "$app/.stage.XXXXXXXX")
 trap 'rm -rf -- "$stage"' EXIT
 install -m 0755 "$source_dir/manager.sh" "$stage/manager.sh"
 install -m 0755 "$source_dir/bootstrap.sh" "$stage/bootstrap.sh"
+install -m 0644 "$source_dir/ui.sh" "$stage/ui.sh"
 revision=${RFS_SOURCE_SHA:-local}
 channel=${RFS_SOURCE_CHANNEL:-local}
 case "$revision" in
@@ -25,7 +26,7 @@ case "$channel" in dev|main|local) ;; *) echo 'FAIL: invalid channel' >&2; exit 
 printf '%s\n' "$revision" > "$stage/revision"
 printf '%s\n' "$channel" > "$stage/channel"
 # Existing scanner binaries, reports and user configuration remain unchanged.
-for name in manager.sh bootstrap.sh revision channel; do
+for name in manager.sh bootstrap.sh ui.sh revision channel; do
   mv -f -- "$stage/$name" "$app/$name"
 done
 ln -sfn "$app/manager.sh" /usr/local/bin/rfs

@@ -227,4 +227,5 @@ main(){
  version|--version) echo "$VERSION";; help|--help|-h) help_text;; *) help_text; return 2;;
  esac
 }
+if [[ -f "$APP_DIR/ui.sh" ]]; then source "$APP_DIR/ui.sh"; fi
 main "$@"
