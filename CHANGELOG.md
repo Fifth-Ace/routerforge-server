@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0 — первый стабильный релиз / first stable release
+- RU/EN Linux server management CLI; tested on Ubuntu 24.04 LTS (amd64).
+- Read-only CPU, RAM, SWAP, disk, network, OS, SSH and UFW status dashboard.
+- RealiTLScanner integration, optional GeoIP, certificate filtering and CSV reports.
+- SSH/UFW tools with explicit confirmation and optional 3x-ui, LucX-UI, RKN Guard, MTProxyL installers.
+- Language selection, update checking and user-confirmed self-update.
+
+## Development history (pre-1.0.0)
 ## 0.1.0-dev (unreleased)
 - Initial standalone RouterForge Server CLI with menu.
 - Read-only status and modular actions.

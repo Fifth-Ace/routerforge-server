@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # RouterForge Server - standalone Ubuntu CLI manager
 set -Eeuo pipefail
-VERSION=0.1.0-dev
+VERSION=1.0.0
 APP_DIR=/opt/routerforge-server
 STATE_DIR=/var/lib/routerforge-server
 CONF_DIR=/etc/routerforge-server

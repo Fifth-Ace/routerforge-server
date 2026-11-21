@@ -4,11 +4,11 @@
 
 # RF Server / RouterForge Server
 
-**Консольное управление VPS · TLS-диагностика · установщики сервисов**
+**Консольный менеджер Linux-серверов · мониторинг · TLS-диагностика · безопасность**
 
 [🇷🇺 Русский](README.md) · [🇬🇧 English](README.en.md)
 
-[![DEV](https://img.shields.io/badge/channel-dev-38bdf8?style=flat-square)](https://github.com/Fifth-Ace/routerforge-server/tree/dev)
+[![Stable](https://img.shields.io/badge/release-v1.0.0-38bdf8?style=flat-square)](https://github.com/Fifth-Ace/routerforge-server/releases/tag/v1.0.0)
 [![CI](https://img.shields.io/github/actions/workflow/status/Fifth-Ace/routerforge-server/verify.yml?branch=dev&style=flat-square&label=Verify)](https://github.com/Fifth-Ace/routerforge-server/actions/workflows/verify.yml)
 
 </div>
@@ -19,7 +19,7 @@
 
 **Русский — основной язык проекта.** [English documentation](README.en.md)
 
-RouterForge Server — самостоятельный консольный менеджер VPS с цветным терминальным меню. Ведётся разработка в ветке `dev`; ветка `main` предназначена для стабильной версии после отдельной публикации.
+RouterForge Server — консольный менеджер Linux-серверов с цветным терминальным меню. Стабильные версии публикуются в `main`, разработка продолжается в `dev`. Проверено на Ubuntu 24.04 LTS (amd64); другие дистрибутивы пока не проверены, отдельные функции используют APT и UFW.
 
 ## Возможности
 
@@ -34,13 +34,13 @@ RouterForge Server — самостоятельный консольный ме�
 - Меню установщиков: классический 3x-ui, LucX-UI, RKN Guard, MTProxyL. Внешние установщики запускаются только после подтверждения; перезапись существующего x-ui заблокирована.
 - Самообновление и автоматическая проверка новых коммитов. **Автоматического обновления без разрешения нет.**
 
-## Установка из dev
+## Установка стабильной версии 1.0.0
 
 Проверьте исходник перед запуском с привилегиями root. Пример команды для ознакомления и установки:
 
 ```bash
-curl -fsSLo /tmp/rfs-bootstrap.sh https://raw.githubusercontent.com/Fifth-Ace/routerforge-server/dev/bootstrap.sh
-sudo bash /tmp/rfs-bootstrap.sh --channel=dev --install
+curl -fsSLo /tmp/rfs-bootstrap.sh https://raw.githubusercontent.com/Fifth-Ace/routerforge-server/v1.0.0/bootstrap.sh
+sudo bash /tmp/rfs-bootstrap.sh --channel=main --install
 rfs
 ```
 
@@ -49,7 +49,7 @@ rfs
 Принудительный выбор без запроса:
 
 ```bash
-sudo bash /tmp/rfs-bootstrap.sh --channel=dev --lang=en --install
+sudo bash /tmp/rfs-bootstrap.sh --channel=main --lang=en --install
 ```
 
 ## Выбор языка

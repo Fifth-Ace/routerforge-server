@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 umask 077
 REPO='Fifth-Ace/routerforge-server'
-CHANNEL='dev'
+CHANNEL='main'
 MODE='install'
 for arg in "$@"; do
   case "$arg" in

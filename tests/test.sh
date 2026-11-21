@@ -80,7 +80,7 @@ result=$(bash -c '
   rfs_update_status_text
   printf "\nSTATE=%s\n" "$RFS_UPDATE_STATE"
 ' _ "$D/manager-lib-p7.sh" "$D/version-state")
-grep -q 'Установлена: 0.1.0-dev (aaaaaaaaaaaa)' <<< "$result"
+grep -q 'Установлена: 1.0.0 (aaaaaaaaaaaa)' <<< "$result"
 grep -q 'Доступна: 0.1.1-dev (bbbbbbbbbbbb)' <<< "$result"
 grep -q 'STATE=available' <<< "$result"
 result=$(bash -c '
