@@ -26,12 +26,14 @@ Neighboring IPs can belong to other tenants; scan only where authorized. Scans f
 ## CLI
 
 ```bash
-vps-manager status
-vps-manager ssh-prepare
-vps-manager scanner-install
-vps-manager scan
-vps-manager filter raw.csv filtered.csv
+rfs status
+rfs ssh-prepare
+rfs scanner-install
+rfs scan
+rfs filter raw.csv filtered.csv
 ```
+
+The previous command `vps-manager` remains available as a compatibility alias.
 
 ## Data and compatibility
 
