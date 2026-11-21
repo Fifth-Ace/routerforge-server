@@ -9,6 +9,8 @@ for arg in "$@"; do
   case "$arg" in
     --channel=dev) CHANNEL=dev ;;
     --channel=main) CHANNEL=main ;;
+    --lang=ru) export RFS_LANG=ru ;;
+    --lang=en) export RFS_LANG=en ;;
     --install) MODE=install ;;
     --update) MODE=update ;;
     *) printf 'FAIL: unknown argument: %s\n' "$arg" >&2; exit 2 ;;
@@ -45,7 +47,7 @@ tar -tzf "$tmp/source.tar.gz" >/dev/null
 mkdir "$tmp/source"
 tar -xzf "$tmp/source.tar.gz" --strip-components=1 -C "$tmp/source" \
   --no-same-owner --no-same-permissions
-for name in install.sh manager.sh bootstrap.sh ui.sh; do
+for name in install.sh manager.sh bootstrap.sh ui.sh locale.sh; do
   [[ -f "$tmp/source/$name" && ! -L "$tmp/source/$name" ]] || { echo "FAIL: $name missing" >&2; exit 1; }
   bash -n "$tmp/source/$name"
 done

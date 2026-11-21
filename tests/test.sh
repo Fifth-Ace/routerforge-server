@@ -173,3 +173,25 @@ grep -q 'Успешных TLS-подключений: 1' <<< "$result"
 grep -q 'ЗАВЕРШЕНО' <<< "$result"
 ! grep -q '66% лимита времени' <<< "$result"
 printf 'P9_REPORTS_AND_PROGRESS: PASS\n'
+
+# P10: RU/EN, GeoIP schema, controlled output and install source safety.
+bash -n locale.sh
+RFS_LANG=en bash manager.sh help >/dev/null
+[[ $(printf '\n' | RFS_LANG=en NO_COLOR=1 bash manager.sh menu | grep -c 'SYSTEM AND DIAGNOSTICS') -ge 1 ]]
+[[ $(printf '\n' | RFS_LANG=ru NO_COLOR=1 bash manager.sh menu | grep -c 'СИСТЕМА И ДИАГНОСТИКА') -ge 1 ]]
+grep -q 'maxlen=limit' manager.sh
+grep -q 'max(3,min(30' manager.sh
+grep -q 'RFS_SCAN_PREV_LINES' manager.sh
+! grep -q 'rfs_scan_render(){.*2J' manager.sh
+for f in install.sh bootstrap.sh; do grep -q 'locale.sh' "$f"; done
+grep -q 'GEO_CODE' manager.sh
+printf 'P10_LOCALE_AND_GEO: PASS\n'
+
+# P10 terminal idle and GitHub README branding.
+grep -Fq 'if [[ -t 0 && -t 1 ]]; then' ui.sh
+grep -q "rfs_update_refresh 1 || true" ui.sh
+grep -q 'routerforge-banner.jpg' README.md
+grep -q 'rf-server-terminal.png' README.md
+grep -q 'rf-server-terminal.png' README.en.md
+[[ -s docs/assets/rf-server-terminal.png ]]
+printf 'P10_README_BRAND_IDLE: PASS\n'

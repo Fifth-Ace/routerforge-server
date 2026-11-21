@@ -8,9 +8,9 @@ else
   RFS_RESET=; RFS_BOLD=; RFS_BLUE=; RFS_GREEN=; RFS_YELLOW=; RFS_DIM=
 fi
 rfs_line(){ printf '%s\n' '──────────────────────────────────────────────────'; }
-rfs_title(){ printf '\n%s%s%s\n' "$RFS_BLUE" "$1" "$RFS_RESET"; }
-rfs_option(){ printf ' %s[%s]%s %s\n' "$RFS_GREEN" "$1" "$RFS_RESET" "$2"; }
-rfs_pause(){ if [[ -t 0 ]]; then read -r -p 'Enter — в меню...' _ || true; fi; }
+rfs_title(){ printf '\n%s%s%s\n' "$RFS_BLUE" "$(rfs_t "$1")" "$RFS_RESET"; }
+rfs_option(){ printf ' %s[%s]%s %s\n' "$RFS_GREEN" "$1" "$RFS_RESET" "$(rfs_t "$2")"; }
+rfs_pause(){ if [[ -t 0 ]]; then read -r -p "$(rfs_t 'Enter — в меню...')" _ || true; fi; }
 rfs_terminal_on(){
  if [[ -t 0 && -t 1 && "${TERM:-dumb}" != dumb ]]; then
    RFS_TUI_ACTIVE=1
@@ -47,7 +47,7 @@ rfs_banner(){
  local revision=local channel=dev
  [[ ! -r "$APP_DIR/revision" ]] || read -r revision < "$APP_DIR/revision"
  [[ ! -r "$APP_DIR/channel" ]] || read -r channel < "$APP_DIR/channel"
- printf '  %sСборка: %s  |  Канал: %s%s\n' "$RFS_DIM" "${revision:0:12}" "$channel" "$RFS_RESET"
+ printf '  %s%s: %s  |  %s: %s%s\n' "$RFS_DIM" "$(rfs_t 'Сборка')" "${revision:0:12}" "$(rfs_t 'Канал')" "$channel" "$RFS_RESET"
 }
 rfs_draw_menu(){
  rfs_redraw
@@ -59,7 +59,7 @@ rfs_draw_menu(){
  rfs_title 'SSH И ЗАЩИТА'
  rfs_option 3 'Подготовить SSH: указать порт вручную (без рестарта)'
  rfs_option 4 'Статус UFW'; rfs_option 5 'Разрешить действующие SSH-порты в UFW'
- printf ' %s[6]%s ICMP DROP (опасно — отдельно подтверждается)\n' "$RFS_YELLOW" "$RFS_RESET"
+ printf ' %s[6]%s %s\n' "$RFS_YELLOW" "$RFS_RESET" "$(rfs_t 'ICMP DROP (опасно — отдельно подтверждается)')"
  rfs_title 'СКАНИРОВАНИЕ И ОТЧЁТЫ'
  rfs_option 7 'Установить RealiTLScanner'; rfs_option 8 'Сканировать соседнюю сеть /24 (IP + время)'
  rfs_option 9 'Посмотреть отчёты'
@@ -71,6 +71,8 @@ rfs_draw_menu(){
  rfs_option 14 'MTProxyL (Liafanx)'
  rfs_title 'ROUTERFORGE SERVER'
  rfs_option 10 'Обновить RFS'; rfs_option 15 'Проверить обновления RFS'
+ rfs_title 'НАСТРОЙКИ'
+ rfs_option 17 'Язык / Language'
  rfs_option 0 'Выход'
  rfs_line
 }
@@ -103,33 +105,43 @@ rfs_menu(){
   trap 'exit 143' TERM
   rfs_terminal_on
   local choice rc before_revision after_revision request_reexec=0
-  rfs_update_refresh 1
+  rfs_update_refresh 1 || true
   while :; do
-   rfs_update_refresh
+   rfs_update_refresh || true
    rfs_draw_menu
    if [[ "${RFS_TUI_ACTIVE:-0}" == 1 ]]; then
      # Check every five minutes without redrawing unchanged menu every 30 seconds.
      # Do not repeat the prompt on silent timeout (a TTY read retains cursor).
-     local prompt='Выбор [0 — выход]: ' old_status new_status
+     local prompt; prompt=$(rfs_t 'Выбор [0 — выход]: '); local old_status new_status
      while :; do
        if read -r -t 300 -p "$prompt" choice; then
          rc=0
          break
        fi
        rc=$?
-       if (( rc <= 128 )); then break; fi
+       # A silent TTY timeout is never an exit request. Some shells/TTYs
+       # return 1 rather than 142 for a timed read, so preserve the session
+       # while the terminal is still attached. EOF from a pipe still exits.
+       if (( rc <= 128 )); then
+         if [[ -t 0 && -t 1 ]]; then
+           sleep 1
+           prompt=''
+           continue
+         fi
+         break
+       fi
        old_status=$(rfs_update_status_text)
-       rfs_update_refresh 1
+       rfs_update_refresh 1 || true
        new_status=$(rfs_update_status_text)
        if [[ "$old_status" != "$new_status" ]]; then
          rfs_draw_menu
-         prompt='Выбор [0 — выход]: '
+         prompt=$(rfs_t 'Выбор [0 — выход]: ')
        else
          prompt=''
        fi
      done
    else
-     read -r -p 'Выбор [0 — выход]: ' choice || break
+     read -r -p "$(rfs_t 'Выбор [0 — выход]: ')" choice || break
      rc=0
    fi
    [[ "$rc" == 0 ]] || break
@@ -158,6 +170,7 @@ rfs_menu(){
       fi
       ;;
     15) rfs_update_refresh 1; rfs_update_display;;
+    17) rfs_language_menu || true;;
     11) rfs_install_third_party 3x-ui || true;;
     12) rfs_install_third_party lucx-ui || true;;
     13) rfs_install_third_party rkn-guard || true;;
@@ -205,7 +218,7 @@ rfs_install_third_party(){
  info "URL: $url"
  info 'Внешний установщик может изменить firewall, Docker, сервисы и порты.'
  info 'RouterForge Server не контролирует изменения, выполняемые внешним проектом.'
- confirm "Скачать и запустить установщик $name от root?" || { info CANCELLED; return 0; }
+ confirm "$(rfs_t 'Скачать и запустить установщик') $name (root)?" || { info CANCELLED; return 0; }
  tmp=$(mktemp /tmp/rfs-external.XXXXXXXX.sh) || return 1
  if ! curl --proto '=https' --tlsv1.2 -fsSL --retry 2 --connect-timeout 10 --max-time 90 "$url" -o "$tmp"; then
   rm -f "$tmp"; die 'Download failed'; return 1
@@ -214,7 +227,7 @@ rfs_install_third_party(){
  sum=$(sha256sum "$tmp" | awk '{print $1}')
  info "DOWNLOADED_SHA256: $sum"
  info 'Этот SHA256 — идентификатор загрузки, не независимая проверка издателя.'
- if ! confirm "Подтвердить выполнение полученного $name (SHA выше)?"; then
+ if ! confirm "$(rfs_t 'Подтвердить выполнение установщика') $name (SHA256 выше)?"; then
   rm -f "$tmp"; info CANCELLED; return 0
  fi
  bash "$tmp" "${extra[@]}"

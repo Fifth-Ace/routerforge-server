@@ -1,93 +1,91 @@
-# RouterForge Server
+<div align="center">
 
-Standalone, Russian-language VPS administration CLI. Planned integration with RouterForge Core and RouterForge Portal; **no remote control API** in v0.1.0-dev.
+<a href="https://github.com/Fifth-Ace/routerforge"><img src="https://raw.githubusercontent.com/Fifth-Ace/routerforge/main/docs/assets/routerforge-banner.jpg" alt="RouterForge — фирменный баннер" width="100%"></a>
 
-## Requirements
+# RF Server / RouterForge Server
 
-Ubuntu 24.04 amd64 (other distributions not yet tested); Bash, Python 3, OpenSSH, `ss`, `curl`, `file`, `timeout`. UFW and `iptables-restore` needed only for firewall commands.
+**Консольное управление VPS · TLS-диагностика · установщики сервисов**
 
-## Install from a verified local checkout
+[🇷🇺 Русский](README.md) · [🇬🇧 English](README.en.md)
+
+[![DEV](https://img.shields.io/badge/channel-dev-38bdf8?style=flat-square)](https://github.com/Fifth-Ace/routerforge-server/tree/dev)
+[![CI](https://img.shields.io/github/actions/workflow/status/Fifth-Ace/routerforge-server/verify.yml?branch=dev&style=flat-square&label=Verify)](https://github.com/Fifth-Ace/routerforge-server/actions/workflows/verify.yml)
+
+</div>
+
+## Интерфейс
+
+![RF Server — терминальное меню](docs/assets/rf-server-terminal.png)
+
+**Русский — основной язык проекта.** [English documentation](README.en.md)
+
+RouterForge Server — самостоятельный консольный менеджер VPS с цветным терминальным меню. Ведётся разработка в ветке `dev`; ветка `main` предназначена для стабильной версии после отдельной публикации.
+
+## Возможности
+
+- Статус Ubuntu/VPS без изменений системы.
+- Обновление Ubuntu по подтверждению.
+- Подготовка собственного SSH-порта **без рестарта SSH** и без автоматического включения UFW.
+- Статус UFW, разрешение SSH-портов, отдельное опасное действие ICMP DROP.
+- RealiTLScanner: выбор IP из назначенных публичных IPv4, выбор длительности (по умолчанию 120 секунд), живой TLS-журнал и таймер.
+- Компактный вывод до **30 последних TLS-подключений** (в узком терминале количество видимых строк ограничено высотой окна).
+- GeoIP `Country.mmdb`: необязательная установка/обновление, при отсутствии показывается `N/A`. В новых CSV добавлен `GEO_CODE`. Исторические отчёты остаются нетронутыми.
+- Отчёты: выбор по номеру, просмотр параметров и результатов.
+- Меню установщиков: классический 3x-ui, LucX-UI, RKN Guard, MTProxyL. Внешние установщики запускаются только после подтверждения; перезапись существующего x-ui заблокирована.
+- Самообновление и автоматическая проверка новых коммитов. **Автоматического обновления без разрешения нет.**
+
+## Установка из dev
+
+Проверьте исходник перед запуском с привилегиями root. Пример команды для ознакомления и установки:
 
 ```bash
-sudo bash install.sh
+curl -fsSLo /tmp/rfs-bootstrap.sh https://raw.githubusercontent.com/Fifth-Ace/routerforge-server/dev/bootstrap.sh
+sudo bash /tmp/rfs-bootstrap.sh --channel=dev --install
 rfs
 ```
 
-## P4: Color menu and installers
+На **первой интерактивной установке** предлагается язык `1 — Русский` (по умолчанию) / `2 — English`.
 
-The `rfs` command opens a color-coded menu split into system, security, scanning, third-party services, and maintenance. Third-party installers are downloaded directly from upstream only after confirmation and SHA256 display. Existing x-ui/LucX installations block the classic 3x-ui installer to avoid overwriting a running panel.
-
-Third-party menu entries: MHSanaei/3x-ui, Flecksis/rkn-guard, Liafanx/MTProxyL.
-
-## What the menu does
-
-- VPS status: read-only.
-- Ubuntu APT update/upgrade: explicit confirmation.
-- SSH port 2202: prepares config only. **Never restarts SSH/socket**; previously configured ports are preserved. SSH activation is explicitly outside the automated flow until a safe remote rollback is implemented.
-- UFW: inspection, SSH allow-listing and *optional* 10 ICMP DROP rules. **Never auto-enables UFW.** The ICMP policy can break Path MTU Discovery.
-- RealiTLScanner: on-demand installation from XTLS official GitHub release (ELF checked, release signature/checksum verification is not yet available); scan adjacent public IPv4 `/24` only on operator confirmation; capped at 120 seconds and two threads; filter Let's Encrypt certificate issuers; CSV output and console summary.
-
-Neighboring IPs can belong to other tenants; scan only where authorized. Scans from VPS networks can violate provider rules.
-
-## CLI
+Принудительный выбор без запроса:
 
 ```bash
-rfs status
-rfs ssh-prepare
-rfs scanner-install
-rfs scan
-rfs filter raw.csv filtered.csv
+sudo bash /tmp/rfs-bootstrap.sh --channel=dev --lang=en --install
 ```
 
-## Data and compatibility
+## Выбор языка
 
-- Reports/backups: `/var/lib/routerforge-server/`.
-- Installer files: `/opt/routerforge-server/`.
-- Future integration: read-only status JSON and narrow per-action API, explicit pairing, scoped tokens, audit trail, HTTPS/mTLS or outbound-only channel; disabled by default.
-- Repeated invocations should not accumulate duplicated managed rules.
-- Release channels: dev and main only; beta and stable are tags, not branches.
+`rfs` → пункт **17 «Язык / Language»**, либо команды `sudo rfs lang ru` и `sudo rfs lang en`.
 
-## Security boundaries
+Настройка сохраняется между обновлениями в `/opt/routerforge-server/language`. Формат CSV остаётся машиночитаемым с латинскими названиями колонок; итоговая таблица и пользовательские подписи локализуются. Технические сообщения внешних приложений не изменяются.
 
-Do not paste arbitrary `curl | bash` commands to root. Clone the repository or download a pinned release, review/check its SHA256, then install. Self-update is available via `rfs self-update`; it updates only RouterForge Server program files.
+## Команды
 
+```bash
+rfs                    # Главное меню
+rfs status             # Статус сервера
+rfs scan               # TLS-сканирование
+rfs reports            # Просмотр отчётов
+rfs check-update       # Проверка обновлений
+rfs self-update        # Обновление по подтверждению
+rfs language           # Переключение языка
+```
 
-## P5: updates, SSH port, confirmations and LucX
+## Где лежат данные
 
-- `rfs` performs a read-only GitHub `dev`/`main` revision check on opening the menu; **no auto-install**. `rfs check-update` repeats the check, `rfs self-update` installs after confirmation. If offline, the menu still works.
-- SSH preparation prompts for a TCP port (1–65535). No port is preselected, and no SSH/socket restart or firewall change occurs automatically. Previously configured ports remain; activation needs a separate verified procedure.
-- Prompts use `Y/n`; Enter defaults to Yes. Always read the action description first.
-- LucX-UI is listed immediately after classic 3x-ui. Because both use x-ui paths and services, installation is blocked if either panel exists; migration requires a separate backup workflow. Installer source: `AlexeyLCP/lucx-ui`.
+- Программа: `/opt/routerforge-server/`.
+- Логи и отчёты: `/var/lib/routerforge-server/reports/`.
+- Каждый новый отчёт: `scope.txt`, `raw.csv`, `filtered.csv`, `summary.txt`, `scanner.log`.
 
-## P6: multihomed TLS scan and refreshed TUI
+## Безопасность
 
-- Option 8 lists directly configured, globally routable IPv4 addresses from `ip -o -4 addr show scope global`. If one is present, it is selected automatically; if multiple exist, choose by number (Enter defaults to the first). No silently guessed egress IP on NAT-only VPS.
-- The selected IPv4 determines which adjacent `/24` is scanned; it **does not bind outbound connections** to that source IP. RealiTLScanner CLI has no source-address option. Check the VPS routing/policy before scanning if the source IP matters.
-- Time limit in seconds is prompted interactively; Enter = 120 seconds. Accepted range: 1–86400 seconds. Two scanner threads remain the default. Scope and limit saved in each report's `scope.txt`.
-- Interactive TTY menu uses an alternate terminal screen and redraws in place, restoring the prior screen on exit. Piped/non-TTY mode does not use terminal control codes. RF Server ASCII banner is original and intentionally distinct from MTProxyL artwork.
+- SSH/ssh.socket не перезапускаются автоматически; подготовка порта не означает его активацию.
+- UFW не включается автоматически. ICMP DROP может нарушить Path MTU Discovery.
+- Сканирование адресов соседней `/24` допускается **только с разрешения владельца сети/провайдера**. Выбор VPS-IP задаёт целевую `/24`, не исходящий адрес TCP-соединений.
+- GeoIP определяет предполагаемую страну адреса по локальной базе, но не гарантирует географическое положение сервера или принадлежность домена.
+- GitHub HTTPS + выбранная ветка являются текущим источником доверия; SHA коммита не заменяет криптографическую подпись релиза.
 
-The P6 banner uses built-in 7-row block letters “RF SERVER” with optional ANSI cyan shading and a subtle shadow; no figlet dependency.
+## Версии и каналы
 
-## P7: automatic update comparison
+`dev` — разработка, `main` — стабильная линия. Отдельных feature-веток нет. Версию программы показывает `VERSION` в `manager.sh`, версию Ubuntu — только диагностика ОС.
 
-- On menu startup and every five minutes while an interactive TTY menu is idle, checks `dev`/`main` read-only. A manual check (option 15 / `rfs check-update`) is also available. No background daemon.
-- Shows `Установлена: 0.1.0-dev (local SHA) → Доступна: 0.1.0-dev (remote SHA)` with green *current* or yellow *update available*. Dev builds share the same semantic version and must be distinguished by commit.
-- For a differing commit, the remote VERSION is fetched from `manager.sh` pinned to that exact commit. If the version file is unavailable, it shows the remote revision without inventing a version.
-- Network failure is displayed as unavailable, not as current. Update installation always requires explicit confirmation.
-
-## P8: live TLS scanner progress
-
-- While the scanner runs, the terminal shows elapsed time, remaining seconds, a progress bar and the last ten log lines. The countdown is a **time-limit countdown**, not a measure of scan completion.
-- The full raw output is preserved in each report's `scanner.log`; `scope.txt`, CSV filtering and selected IP/time are unchanged.
-- Ctrl+C requests a stop; interactive rendering uses the existing terminal screen without continuously scrolling. Non-TTY runs print sparse progress lines.
-
-## P8 v2: in-process update handoff
-
-After a successful RFS update changes the installed revision, the menu restores the terminal and uses `exec /opt/routerforge-server/manager.sh menu` to start the new code in the same SSH session. Cancelled/failed/no-change updates keep the old menu open.
-
-## P9: TLS report browser, compact progress and GeoIP
-
-- Fixed Bash function `head()` shadowing the standard `/usr/bin/head` (renamed to `rfs_heading`); menu item 9 now selects and reads stored scans, scope and filtered summary. Report files are never edited.
-- Progress screen shows successful TLS connections and compact `IP | domain | issuer` rows; timeout progress is explicitly labeled elapsed time. Normal completion uses final `ЗАВЕРШЕНО`, error or timeout use distinct statuses. Raw `scanner.log` remains intact.
-- Optional Country.mmdb installer from `Loyalsoldier/geoip` GitHub release, the source linked by XTLS/RealiTLScanner. Size and MaxMind metadata marker are checked; the downloaded file SHA256 is logged, but this is not independent publisher attestation.
-- RealiTLScanner runs from its bin directory to locate `Country.mmdb`. The database is opt-in and can be refreshed from menu item 16; if it cannot be installed, scanning still works without GeoIP data.
+[English README](README.en.md)

@@ -8,15 +8,19 @@ CONF_DIR=/etc/routerforge-server
 LOG_DIR=/var/log/routerforge-server
 SCAN_SECONDS=120
 SCAN_THREADS=2
+RFS_SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+if [[ -r "$APP_DIR/locale.sh" ]]; then source "$APP_DIR/locale.sh";
+elif [[ -r "$RFS_SELF_DIR/locale.sh" ]]; then source "$RFS_SELF_DIR/locale.sh";
+else RFS_LANG=ru; rfs_t(){ printf '%s' "$1"; }; fi
 mkdir_state(){ install -d -m 0750 "$STATE_DIR" "$STATE_DIR/reports" "$STATE_DIR/backups" "$LOG_DIR"; }
-rfs_heading(){ printf '\n=== %s ===\n' "$*"; }
-info(){ printf '%s\n' "$*"; }
-die(){ printf 'STATE: FAIL / %s\n' "$*" >&2; return 1; }
+rfs_heading(){ printf '\n=== %s ===\n' "$(rfs_t "$*")"; }
+info(){ printf '%s\n' "$(rfs_t "$*")"; }
+die(){ printf 'STATE: FAIL / %s\n' "$(rfs_t "$*")" >&2; return 1; }
 root(){ (( EUID == 0 )) || { die 'root required'; return 1; }; }
 ubuntu(){ [[ -f /etc/os-release ]] || { die 'Missing os-release'; return 1; }; . /etc/os-release; [[ "${ID:-}" == ubuntu ]] || { die 'Ubuntu required'; return 1; }; }
 confirm(){
  local reply
- read -r -p "$1 [Y/n]: " reply || return 1
+ read -r -p "$(rfs_t "$1") [Y/n]: " reply || return 1
  case "${reply,,}" in ''|y|yes|д|да) return 0;; n|no|н|нет) return 1;; *) info 'Ответьте Y или n'; return 1;; esac
 }
 port_listeners(){ ss -H -ltnp 2>/dev/null | grep -E ':(22|222|2202)([[:space:]]|$)' || true; }
@@ -36,9 +40,9 @@ ssh_prepare(){
  local current target stamp file backup temp
  current=$(/usr/sbin/sshd -T 2>/dev/null | awk '$1=="port" {print $2}' | sort -nu) || { die 'Cannot read sshd config'; return 1; }
  [[ -n "$current" ]] || { die 'No configured SSH ports'; return 1; }
- printf 'EXISTING_PORTS:\n%s\n' "$current"
+ printf '%s:\n%s\n' "$(rfs_t 'Действующие SSH-порты')" "$current"
  port_listeners
- read -r -p 'Введите новый SSH-порт (1–65535, пусто — отмена): ' target || return 1
+ read -r -p "$(rfs_t 'Введите новый SSH-порт (1–65535, пусто — отмена): ')" target || return 1
  [[ -n "$target" ]] || { info 'CANCELLED'; return 0; }
  [[ "$target" =~ ^[0-9]{1,5}$ ]] && ((10#$target>=1 && 10#$target<=65535)) || { die 'Invalid TCP port'; return 1; }
  target=$((10#$target))
@@ -148,14 +152,14 @@ scanner_filter(){
  local src=$1 output=$2
  python3 - "$src" "$output" <<'PY'
 import sys,csv,pathlib
-src=pathlib.Path(sys.argv[1]); target=pathlib.Path(sys.argv[2]); cols=('IP','CERT_DOMAIN','CERT_ISSUER')
+src=pathlib.Path(sys.argv[1]); target=pathlib.Path(sys.argv[2]); required=('IP','CERT_DOMAIN','CERT_ISSUER'); cols=required+('GEO_CODE',); lang=__import__('os').environ.get('RFS_LANG','ru')
 with src.open(encoding='utf-8-sig',newline='') as f:
   reader=csv.DictReader(f)
-  if not reader.fieldnames or any(c not in reader.fieldnames for c in cols):
+  if not reader.fieldnames or any(c not in reader.fieldnames for c in required):
     raise SystemExit('Unexpected scanner CSV columns: '+str(reader.fieldnames))
   records=set(); excluded=0
   for row in reader:
-    record=tuple((row.get(c) or '').strip() for c in cols)
+    record=tuple((row.get(c) or ('N/A' if c=='GEO_CODE' else '')).strip() for c in cols)
     if 'let\'s encrypt' in record[2].casefold() or 'lets encrypt' in record[2].casefold(): excluded+=1; continue
     if all(record): records.add(record)
 records=sorted(records)
@@ -163,9 +167,9 @@ with target.open('w',encoding='utf-8',newline='') as f:
   writer=csv.writer(f); writer.writerow(cols);writer.writerows(records)
 widths=[max([len(c)]+[len(r[i]) for r in records]) for i,c in enumerate(cols)]
 fmt='  '.join('{:<'+str(w)+'}' for w in widths)
-print(fmt.format(*cols));print(fmt.format(*('-'*w for w in widths)))
+print(fmt.format(*(('IP','ДОМЕН','ИЗДАТЕЛЬ','СТРАНА') if lang=='ru' else ('IP','DOMAIN','ISSUER','COUNTRY'))));print(fmt.format(*('-'*w for w in widths)))
 for r in records: print(fmt.format(*r))
-print(f'RETAINED: {len(records)} / LETS_ENCRYPT_EXCLUDED: {excluded}')
+print((f'Найдено: {len(records)} / Исключено Let’s Encrypt: {excluded}' if lang=='ru' else f'Found: {len(records)} / Excluded Let’s Encrypt: {excluded}')); print(f'RETAINED: {len(records)} / LETS_ENCRYPT_EXCLUDED: {excluded}')
 PY
 }
 public_ip(){ curl -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org; }
@@ -207,7 +211,7 @@ scanner_select_ip(){
  info 'Выберите привязанный к VPS публичный IPv4:'
  for ((i=0;i<count;i++)); do printf '  [%d] %s\n' "$((i+1))" "${addresses[i]}"; done
  while :; do
-   read -r -p "Номер IP [1], 0 — отмена: " answer || return 1
+   read -r -p "$(rfs_t 'Номер IP [1], 0 — отмена: ')" answer || return 1
    answer=${answer:-1}
    [[ "$answer" == 0 ]] && { info 'CANCELLED'; return 1; }
    if [[ "$answer" =~ ^[0-9]+$ ]] && (( 10#$answer >= 1 && 10#$answer <= count )); then
@@ -221,7 +225,7 @@ scanner_select_ip(){
 scanner_select_seconds(){
  local answer
  while :; do
-   read -r -p "Продолжительность сканирования в секундах [${SCAN_SECONDS}]: " answer || return 1
+   read -r -p "$(rfs_t 'Продолжительность сканирования в секундах') [${SCAN_SECONDS}]: " answer || return 1
    answer=${answer:-$SCAN_SECONDS}
    if [[ "$answer" =~ ^[0-9]{1,5}$ ]] && ((10#$answer >= 1 && 10#$answer <= 86400)); then
      SCAN_SELECTED_SECONDS=$((10#$answer))
@@ -268,56 +272,87 @@ PYMMDB
  info "GEOIP_INSTALLED: $dest"
  info "GEOIP_SHA256: $sha (download fingerprint, not a publisher signature)"
 }
-rfs_scan_render(){
+# P10: produce one fixed-height frame, then update only modified terminal rows.
+# Never clear the entire screen after initial draw.
+rfs_scan_frame(){
  local start=$1 duration=$2 log=$3 network=$4 source_ip=$5 worker=$6 final=${7:-0}
- local elapsed remaining width=24 filled empty bar shade now
- now=$(date +%s)
- elapsed=$((now-start)); ((elapsed<0)) && elapsed=0
+ local elapsed remaining width=24 filled empty bar shade now maxrows
+ now=$(date +%s); elapsed=$((now-start)); ((elapsed<0)) && elapsed=0
  remaining=$((duration-elapsed)); ((remaining<0)) && remaining=0
  filled=$((elapsed*width/duration)); ((filled>width)) && filled=$width
  empty=$((width-filled))
  printf -v bar '%*s' "$filled" ''; bar=${bar// /█}
  printf -v shade '%*s' "$empty" ''; shade=${shade// /░}
- if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
-   printf '\033[H\033[2J'
+ maxrows=30
+ if [[ -t 1 ]]; then
+   local term_rows; term_rows=$(tput lines 2>/dev/null || printf '40')
+   [[ "$term_rows" =~ ^[0-9]+$ ]] || term_rows=40
+   if (( term_rows < maxrows + 10 )); then maxrows=$((term_rows-10)); fi
+   ((maxrows<3)) && maxrows=3
  fi
- printf '\n\033[1;96m RF SERVER / TLS SCANNER\033[0m\n'
- printf ' Сеть: %-18s | VPS IP: %s\n' "$network" "$source_ip"
- printf ' Прошло: %ds  |  Осталось: %ds  |  Лимит: %ds\n' "$elapsed" "$remaining" "$duration"
+ printf ' RF SERVER / TLS SCANNER\n'
+ printf ' %s: %-18s | VPS IP: %s\n' "$(rfs_t 'Сеть')" "$network" "$source_ip"
+ printf ' %s: %ds | %s: %ds | %s: %ds\n' "$(rfs_t 'Прошло')" "$elapsed" "$(rfs_t 'Осталось')" "$remaining" "$(rfs_t 'Лимит')" "$duration"
  if [[ "$final" == 0 ]]; then
-   printf ' [%s%s] %d%% лимита времени\n' "$bar" "$shade" "$((elapsed*100/duration))"
-   printf ' Статус: СКАНИРОВАНИЕ (Ctrl+C — остановка)\n'
+   printf ' [%s%s] %d%% %s\n' "$bar" "$shade" "$((elapsed*100/duration))" "$(rfs_t 'Времени использовано')"
+   printf ' %s (Ctrl+C)\n' "$(rfs_t 'СКАНИРОВАНИЕ')"
  elif [[ "$final" == 1 ]]; then
-   printf ' Статус: ЗАВЕРШЕНО / фактически %d сек.\n' "$elapsed"
+   printf ' %s: %ds\n' "$(rfs_t 'ЗАВЕРШЕНО')" "$elapsed"
  elif [[ "$final" == 124 ]]; then
-   printf ' Статус: ЛИМИТ ВРЕМЕНИ / %d сек.\n' "$elapsed"
+   printf ' %s: %ds\n' "$(rfs_t 'ЛИМИТ ВРЕМЕНИ')" "$elapsed"
  else
-   printf ' Статус: ПРЕРВАНО ИЛИ ОШИБКА / код %s\n' "$final"
+   printf ' %s: %s\n' "$(rfs_t 'ПРЕРВАНО ИЛИ ОШИБКА')" "$final"
  fi
- # Reformat scanner's long key=value logs to compact fixed-width rows;
- # the original unmodified log always remains in scanner.log.
- python3 - "$log" <<'PYLOG'
+ RFS_SCAN_MAX_ROWS=$maxrows python3 - "$log" <<'PYLOG'
 from collections import deque
 from pathlib import Path
-import re,sys
-p=Path(sys.argv[1]); rows=deque(maxlen=7); total=0; last='нет'
+import re,sys,os
+p=Path(sys.argv[1]); limit=max(3,min(30,int(os.environ.get('RFS_SCAN_MAX_ROWS','30'))))
+rows=deque(maxlen=limit); total=0; last='—'; lang=os.environ.get('RFS_LANG','ru')
 if p.is_file():
-    for line in p.open(encoding='utf-8', errors='replace'):
+    for line in p.open(encoding='utf-8',errors='replace'):
         if 'msg="Connected to target"' not in line: continue
         total+=1
         def get(k):
             match=re.search(r'(?<![\w-])'+re.escape(k)+r'=(?:"([^"]*)"|([^\s]+))',line)
             return ((match.group(1) or match.group(2)) if match else '-')
         tm=re.search(r'time=([^\s]+)',line)
-        last=tm.group(1)[11:19] if tm else 'есть'
-        rows.append((get('ip'),get('cert-domain'),get('cert-issuer')))
-print(f' Успешных TLS-подключений: {total} | Последняя активность: {last}')
-print(' ─── IP ──────────── ДОМЕН ─────────────────────── ИЗДАТЕЛЬ ──────────')
-if not rows: print(' Ожидание успешных TLS-подключений...')
-for ip,domain,issuer in rows:
-    print(f' {ip:<15.15}  {domain:<29.29}  {issuer:<22.22}')
-print(' ─────────────────────────────────────────────────────────────────────')
+        last=tm.group(1)[11:19] if tm else '—'
+        rows.append((get('ip'),get('cert-domain'),get('cert-issuer'),get('geo')))
+if lang=='ru':
+    print(f' Успешных TLS-подключений: {total} | Последняя активность: {last} | Последние {limit}')
+    print(' IP               ДОМЕН                         ИЗДАТЕЛЬ           ГЕО')
+else:
+    print(f' Successful TLS: {total} | Last activity: {last} | Last {limit}')
+    print(' IP               DOMAIN                        ISSUER            GEO')
+if not rows: print(' Ожидание TLS-подключений...' if lang=='ru' else ' Waiting for TLS connections...')
+for ip,domain,issuer,geo in rows:
+    print(f' {ip:<15.15}  {domain:<29.29}  {issuer:<17.17} {geo:<5.5}')
+print(' ' + '─'*70)
 PYLOG
+}
+rfs_scan_render(){
+ local content i total previous
+ content=$(rfs_scan_frame "$@") || return 1
+ if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
+   local -a newlines=()
+   mapfile -t newlines <<< "$content"
+   if [[ "${RFS_SCAN_FIRST_FRAME:-1}" == 1 ]]; then
+     printf '\033[H\033[2J\033[?25l'
+     RFS_SCAN_FIRST_FRAME=0
+   fi
+   total=${#newlines[@]}; previous=${#RFS_SCAN_PREV_LINES[@]}
+   for ((i=0;i<total;i++)); do
+     if [[ "${RFS_SCAN_PREV_LINES[i]-}" != "${newlines[i]}" ]]; then
+       printf '\033[%d;1H\033[2K%s' "$((i+1))" "${newlines[i]}"
+     fi
+   done
+   for ((i=total;i<previous;i++)); do printf '\033[%d;1H\033[2K' "$((i+1))"; done
+   RFS_SCAN_PREV_LINES=("${newlines[@]}")
+   printf '\033[%d;1H' "$((total+1))"
+ else
+   printf '%s\n' "$content"
+ fi
 }
 scanner_run(){ (
  root || exit 1
@@ -325,6 +360,8 @@ scanner_run(){ (
  command -v timeout >/dev/null || { die 'timeout missing'; exit 1; }
  local cidr stamp report rc=0 worker='' start elapsed next_log=0
  local SCAN_SELECTED_IP= SCAN_SELECTED_SECONDS=
+ local RFS_SCAN_FIRST_FRAME=1
+ local -a RFS_SCAN_PREV_LINES=()
  rfs_heading 'SCANNER / SCOPE'
  scanner_select_ip || { info 'SCANNER: CANCELLED / no network changes'; exit 0; }
  scanner_select_seconds || { info 'SCANNER: CANCELLED'; exit 0; }
@@ -334,14 +371,14 @@ p=ipaddress.ip_address(sys.argv[1]); assert p.version==4 and p.is_global
 print(ipaddress.ip_network(f'{p}/24',strict=False))
 PYIP
 ) || { die 'Cannot calculate public IPv4 network'; exit 1; }
- info "SELECTED_VPS_IP: $SCAN_SELECTED_IP"
- info "TARGET_NEIGHBORS: $cidr"
- info "TIME_LIMIT: ${SCAN_SELECTED_SECONDS}s / THREADS: $SCAN_THREADS"
- info 'ATTENTION: selected IP defines /24 scope, NOT outbound source IP.'
- info 'Neighboring addresses may belong to other clients; provider permission is required.'
- confirm "Запустить сканирование $cidr на TCP 443?" || { info CANCELLED; exit 0; }
+ printf "%s: %s\n" "$(rfs_t 'Выбран IP VPS')" "$SCAN_SELECTED_IP"
+ printf "%s: %s\n" "$(rfs_t 'Целевая сеть')" "$cidr"
+ printf "%s: %s c / %s: %s\n" "$(rfs_t 'Лимит времени')" "$SCAN_SELECTED_SECONDS" "$(rfs_t 'Потоков')" "$SCAN_THREADS"
+ info 'ВНИМАНИЕ: выбранный IP определяет сеть /24, но не исходящий IP соединений.'
+ info 'Соседние IP могут принадлежать другим клиентам. Необходимо разрешение владельца сети.'
+ confirm "$(rfs_t 'Запустить сканирование сети') $cidr (TCP 443)?" || { info CANCELLED; exit 0; }
  if [[ ! -f "$APP_DIR/bin/Country.mmdb" ]]; then
-   scanner_geoip_install || info 'GEOIP: unavailable / scan continues without it'
+   scanner_geoip_install || info 'GeoIP недоступна, сканирование продолжится без неё'
  fi
  mkdir_state
  stamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -356,7 +393,7 @@ PYIP
  # Keep traps inside the scanner subshell; never mutate the main menu's traps.
  trap '[[ -z "$worker" ]] || { kill -TERM "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; }; exit 130' INT
  trap '[[ -z "$worker" ]] || { kill -TERM "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; }; exit 143' TERM
- trap '[[ -z "$worker" ]] || { if kill -0 "$worker" 2>/dev/null; then kill -TERM "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; fi; }' EXIT
+ trap 'printf '\033[?25h'; [[ -z "$worker" ]] || { if kill -0 "$worker" 2>/dev/null; then kill -TERM "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; fi; }' EXIT
  start=$(date +%s)
  while kill -0 "$worker" 2>/dev/null; do
    if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
@@ -377,13 +414,14 @@ PYIP
  if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
    rfs_scan_render "$start" "$SCAN_SELECTED_SECONDS" "$report/scanner.log" "$cidr" "$SCAN_SELECTED_IP" 0 "$([[ $rc == 0 ]] && echo 1 || echo "$rc")"
  fi
- info "SCANNER_EXIT_CODE: $rc"
+ [[ -t 1 ]] && printf '\033[?25h' || true
+ printf "%s: %s\n" "$(rfs_t 'Код завершения сканера')" "$rc"
  if [[ "$rc" != 0 && "$rc" != 124 && "$rc" != 130 ]]; then
-   info 'WARNING: scanner exited unexpectedly; see scanner.log'
+   info 'ПРЕДУПРЕЖДЕНИЕ: сканер завершился с ошибкой, см. scanner.log'
  fi
  [[ -f "$report/raw.csv" ]] || { die "Scanner produced no CSV: $report/scanner.log"; exit 1; }
  scanner_filter "$report/raw.csv" "$report/filtered.csv" | tee "$report/summary.txt"
- rfs_heading RESULT; info "REPORT: $report"; info 'STATE: PASS / REPORT WRITTEN'
+ rfs_heading RESULT; printf "%s: %s\n" "$(rfs_t 'Путь к отчёту')" "$report"; info 'Отчёт сохранён успешно'
 ) }
 
 # Read-only update probe. A semantic version alone cannot distinguish dev builds:
@@ -437,14 +475,14 @@ rfs_update_status_text(){
  local installed available
  installed=$(rfs_update_version_label "$RFS_UPDATE_LOCAL_VERSION" "$RFS_UPDATE_LOCAL_SHA")
  if [[ "$RFS_UPDATE_STATE" == unavailable ]]; then
-   printf 'Установлена: %s  |  Проверка обновлений недоступна' "$installed"
+   printf '%s: %s  |  %s' "$(rfs_t 'Установлена')" "$installed" "$(rfs_t 'Проверка обновлений недоступна')"
    return
  fi
  available=$(rfs_update_version_label "$RFS_UPDATE_REMOTE_VERSION" "$RFS_UPDATE_REMOTE_SHA")
  if [[ "$RFS_UPDATE_STATE" == current ]]; then
-   printf 'Установлена: %s  →  Доступна: %s  [АКТУАЛЬНО]' "$installed" "$available"
+   printf '%s: %s  →  %s: %s  [%s]' "$(rfs_t 'Установлена')" "$installed" "$(rfs_t 'Доступна')" "$available" "$(rfs_t 'АКТУАЛЬНО')"
  else
-   printf 'Установлена: %s  →  Доступна: %s  [ОБНОВЛЕНИЕ]' "$installed" "$available"
+   printf '%s: %s  →  %s: %s  [%s]' "$(rfs_t 'Установлена')" "$installed" "$(rfs_t 'Доступна')" "$available" "$(rfs_t 'ОБНОВЛЕНИЕ')"
  fi
 }
 rfs_check_update(){
@@ -478,7 +516,7 @@ reports(){
  for ((i=0;i<${#names[@]};i++)); do
    printf ' [%2d] %s\n' "$((i+1))" "${names[i]}"
  done
- read -r -p 'Номер отчёта [0 — назад]: ' choice || return 0
+ read -r -p "$(rfs_t 'Номер отчёта [0 — назад]: ')" choice || return 0
  choice=${choice:-0}
  [[ "$choice" == 0 ]] && return 0
  [[ "$choice" =~ ^[0-9]{1,2}$ ]] && ((10#$choice>=1 && 10#$choice<=${#names[@]})) || { info 'Неверный номер отчёта'; return 1; }
@@ -487,17 +525,17 @@ reports(){
  [[ -d "$rootpath" && ! -L "$rootpath" ]] || { die 'Report directory unavailable'; return 1; }
  rfs_heading "REPORT / $selected"
  if [[ -f "$rootpath/scope.txt" && ! -L "$rootpath/scope.txt" ]]; then
-   info '=== ПАРАМЕТРЫ СКАНИРОВАНИЯ ==='
+   info "=== $(rfs_t 'ПАРАМЕТРЫ СКАНИРОВАНИЯ') ==="
    cat -- "$rootpath/scope.txt"
  fi
  if [[ -f "$rootpath/summary.txt" && ! -L "$rootpath/summary.txt" ]]; then
-   info '=== РЕЗУЛЬТАТЫ (БЕЗ LETS ENCRYPT) ==='
+   info "=== $(rfs_t 'РЕЗУЛЬТАТЫ (БЕЗ LETS ENCRYPT)') ==="
    cat -- "$rootpath/summary.txt"
  else
    info 'SUMMARY: отсутствует (сканирование могло быть прервано)'
  fi
  if [[ -f "$rootpath/scanner.log" && ! -L "$rootpath/scanner.log" ]]; then
-   info '=== ЗАВЕРШЕНИЕ / ПОСЛЕДНИЕ СОБЫТИЯ ==='
+   info "=== $(rfs_t 'ЗАВЕРШЕНИЕ / ПОСЛЕДНИЕ СОБЫТИЯ') ==="
    grep -E 'Scanning completed|level=(WARN|ERROR)' "$rootpath/scanner.log" | tail -n 5 || true
  fi
  info "REPORT_PATH: $rootpath"
@@ -529,17 +567,26 @@ TXT
   esac
  done
 }
-help_text(){ cat <<'TXT'
+help_text(){
+ if [[ "$RFS_LANG" == en ]]; then
+  cat <<'TXT'
 RouterForge Server
-Usage: rfs [menu|status|update|check-update|ssh-prepare|ufw-status|ufw-ssh|ufw-icmp|scanner-install|scan|reports|self-update|filter CSV OUTPUT]
-No root service is started automatically. No firewall activation or SSH restart.
+Usage: rfs [menu|status|update|check-update|ssh-prepare|ufw-status|ufw-ssh|ufw-icmp|scanner-install|scan|reports|self-update|language|lang ru|lang en|filter CSV OUTPUT]
+SSH and firewall are never restarted/activated automatically by setup or update.
 TXT
+ else
+  cat <<'TXT'
+RouterForge Server
+Использование: rfs [menu|status|update|check-update|ssh-prepare|ufw-status|ufw-ssh|ufw-icmp|scanner-install|scan|reports|self-update|language|lang ru|lang en|filter CSV OUTPUT]
+Подготовка порта не перезапускает SSH. RFS не включает UFW автоматически.
+TXT
+ fi
 }
 main(){
  case "${1:-menu}" in
  menu) menu;; status) status;; update) updates;; ssh-prepare) ssh_prepare;; ufw-status) ufw_status;; ufw-ssh) ufw_ssh;; ufw-icmp) ufw_icmp;;
  scanner-install) scanner_install;; scan) scanner_run;; reports) reports;; self-update) self_update;; filter) [[ $# == 3 ]] || { help_text; return 2; }; scanner_filter "$2" "$3";;
- check-update) rfs_check_update;; version|--version) echo "$VERSION";; help|--help|-h) help_text;; *) help_text; return 2;;
+ check-update) rfs_check_update;; language) rfs_language_menu;; lang) [[ "${2:-}" == ru || "${2:-}" == en ]] || return 2; [[ "$EUID" == 0 ]] || return 1; local tmp; tmp=$(mktemp "$APP_DIR/.language.XXXXXX"); printf "%s\n" "$2" > "$tmp"; chmod 0644 "$tmp"; mv -f "$tmp" "$APP_DIR/language";; version|--version) echo "$VERSION";; help|--help|-h) help_text;; *) help_text; return 2;;
  esac
 }
 if [[ -f "$APP_DIR/ui.sh" ]]; then source "$APP_DIR/ui.sh"; elif [[ -f "$(dirname "${BASH_SOURCE[0]}")/ui.sh" ]]; then source "$(dirname "${BASH_SOURCE[0]}")/ui.sh"; fi

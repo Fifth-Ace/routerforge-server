@@ -16,3 +16,6 @@
 - P8: live RealiTLScanner log tail, deadline countdown, and Ctrl+C cleanup.
 - P8 v2: restart RFS UI immediately after verified successful self-update, preserving SSH session.
 - P9: fix reports menu/head shadowing; interactive report viewer, compact scan live feed and accurate completion status; optional Country.mmdb installation.
+
+- P10: no-flicker incremental TLS TUI, 30-line history, GeoIP column, RU default / EN secondary, language selection on install and in menu, RU README and EN README.
+- P10: RouterForge shared README banner and user-supplied terminal screenshot; resilient idle prompt handling.
