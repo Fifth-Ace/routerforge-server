@@ -12,24 +12,29 @@ rfs_title(){ printf '\n%s%s%s\n' "$RFS_BLUE" "$1" "$RFS_RESET"; }
 rfs_option(){ printf ' %s[%s]%s %s\n' "$RFS_GREEN" "$1" "$RFS_RESET" "$2"; }
 rfs_pause(){ if [[ -t 0 ]]; then read -r -p 'Enter — продолжить...' _ || true; fi; }
 rfs_menu(){
+ # Automatic version check once per menu launch. Read-only, no background updater.
+ printf '\n%s%s RouterForge Server %s %s\n' "$RFS_BOLD" "$RFS_BLUE" "$VERSION" "$RFS_RESET"
+ rfs_check_update
  while :; do
   printf '\n%s%s RouterForge Server %s %s\n' "$RFS_BOLD" "$RFS_BLUE" "$VERSION" "$RFS_RESET"
   rfs_line
   rfs_title 'СИСТЕМА И ДИАГНОСТИКА'
   rfs_option 1 'Состояние VPS'; rfs_option 2 'Обновить Ubuntu'
   rfs_title 'SSH И ЗАЩИТА'
-  rfs_option 3 'Подготовить SSH 2202 (без перезапуска)'
-  rfs_option 4 'Статус UFW'; rfs_option 5 'Разрешить SSH-порты в UFW'
+  rfs_option 3 'Подготовить SSH: указать порт вручную (без рестарта)'
+  rfs_option 4 'Статус UFW'; rfs_option 5 'Разрешить действующие SSH-порты в UFW'
   printf ' %s[6]%s ICMP DROP (опасно — отдельно подтверждается)\n' "$RFS_YELLOW" "$RFS_RESET"
   rfs_title 'СКАНИРОВАНИЕ И ОТЧЁТЫ'
   rfs_option 7 'Установить RealiTLScanner'; rfs_option 8 'Сканировать разрешённую сеть /24 (120 с)'
   rfs_option 9 'Посмотреть отчёты'
   rfs_title 'УСТАНОВКА СЕРВИСОВ'
   rfs_option 11 'Классический 3x-ui (MHSanaei)'
-  rfs_option 12 'RKN Guard (Flecksis)'
-  rfs_option 13 'MTProxyL (Liafanx)'
+  rfs_option 12 'LucX-UI (AlexeyLCP)'
+  rfs_option 13 'RKN Guard (Flecksis)'
+  rfs_option 14 'MTProxyL (Liafanx)'
   rfs_title 'ROUTERFORGE SERVER'
-  rfs_option 10 'Обновить RFS'; rfs_option 0 'Выход'
+  rfs_option 10 'Обновить RFS'; rfs_option 15 'Проверить обновления RFS'
+  rfs_option 0 'Выход'
   rfs_line
   local choice
   read -r -p 'Выбор: ' choice || break
@@ -37,10 +42,11 @@ rfs_menu(){
    1) status || true;; 2) updates || true;; 3) ssh_prepare || true;;
    4) ufw_status || true;; 5) ufw_ssh || true;; 6) ufw_icmp || true;;
    7) scanner_install || true;; 8) scanner_run || true;; 9) reports || true;;
-   10) self_update || true;;
+   10) self_update || true;; 15) rfs_check_update || true;;
    11) rfs_install_third_party 3x-ui || true;;
-   12) rfs_install_third_party rkn-guard || true;;
-   13) rfs_install_third_party mtproxyl || true;;
+   12) rfs_install_third_party lucx-ui || true;;
+   13) rfs_install_third_party rkn-guard || true;;
+   14) rfs_install_third_party mtproxyl || true;;
    0) break;; *) info 'Неизвестный пункт';;
   esac
   rfs_pause
@@ -55,6 +61,13 @@ rfs_install_third_party(){
    # Both projects use x-ui: never run upstream installer over an existing panel.
    if [[ -e /usr/local/x-ui || -e /etc/x-ui || -e /etc/systemd/system/x-ui.service ]] || command -v x-ui >/dev/null 2>&1; then
     die 'Обнаружен существующий x-ui/LucX. Установка заблокирована во избежание перезаписи.'; return 1
+   fi
+   ;;
+  lucx-ui)
+   ref='AlexeyLCP/lucx-ui / main'; url='https://raw.githubusercontent.com/AlexeyLCP/lucx-ui/main/install.sh'
+   # Both LucX and classic 3x-ui use x-ui files/service. Block accidental replacement.
+   if [[ -e /usr/local/x-ui || -e /etc/x-ui || -e /etc/systemd/system/x-ui.service ]] || command -v x-ui >/dev/null 2>&1; then
+    die 'Найдена установленная панель x-ui/LucX. Перед миграцией нужна отдельная резервная копия; автоматическая установка заблокирована.'; return 1
    fi
    ;;
   rkn-guard)

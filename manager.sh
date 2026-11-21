@@ -8,14 +8,17 @@ CONF_DIR=/etc/routerforge-server
 LOG_DIR=/var/log/routerforge-server
 SCAN_SECONDS=120
 SCAN_THREADS=2
-SSH_TARGET_PORT=2202
 mkdir_state(){ install -d -m 0750 "$STATE_DIR" "$STATE_DIR/reports" "$STATE_DIR/backups" "$LOG_DIR"; }
 head(){ printf '\n=== %s ===\n' "$*"; }
 info(){ printf '%s\n' "$*"; }
 die(){ printf 'STATE: FAIL / %s\n' "$*" >&2; return 1; }
 root(){ (( EUID == 0 )) || { die 'root required'; return 1; }; }
 ubuntu(){ [[ -f /etc/os-release ]] || { die 'Missing os-release'; return 1; }; . /etc/os-release; [[ "${ID:-}" == ubuntu ]] || { die 'Ubuntu required'; return 1; }; }
-confirm(){ local reply; read -r -p "$1 [введите ДА]: " reply; [[ "$reply" == 'ДА' ]]; }
+confirm(){
+ local reply
+ read -r -p "$1 [Y/n]: " reply || return 1
+ case "${reply,,}" in ''|y|yes|д|да) return 0;; n|no|н|нет) return 1;; *) info 'Ответьте Y или n'; return 1;; esac
+}
 port_listeners(){ ss -H -ltnp 2>/dev/null | grep -E ':(22|222|2202)([[:space:]]|$)' || true; }
 status(){
  head 'PRECHECK / READ ONLY'; cat /etc/os-release | grep '^PRETTY_NAME=' || true
@@ -26,35 +29,47 @@ status(){
 }
 updates(){ root || return 1; ubuntu || return 1; head 'PRECHECK / APT'; confirm 'Выполнить apt update + upgrade без вопросов?' || { info 'CANCELLED'; return; }; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l; apt-get update && apt-get -y -o Dpkg::Options::=--force-confold upgrade; head RESULT; info 'APT: PASS'; }
 ssh_prepare(){
- root || return 1; command -v sshd >/dev/null || [[ -x /usr/sbin/sshd ]] || { die 'sshd missing'; return 1; }
- mkdir_state
- head 'PRECHECK / SSH'; install -d -m 0755 /run/sshd
- /usr/sbin/sshd -t || { die 'SSHD syntax invalid before changes'; return 1; }
- local effective; effective=$(/usr/sbin/sshd -T | awk '$1=="port"{print $2}' | sort -nu)
- printf 'EXISTING_PORTS:\n%s\n' "$effective"
+ root || return 1
+ command -v /usr/sbin/sshd >/dev/null 2>&1 || [[ -x /usr/sbin/sshd ]] || { die 'sshd missing'; return 1; }
+ head 'PRECHECK / SSH / CONFIG ONLY'
+ # Read-only preflight. Do not create /run/sshd or restart sockets.
+ local current target stamp file backup temp
+ current=$(/usr/sbin/sshd -T 2>/dev/null | awk '$1=="port" {print $2}' | sort -nu) || { die 'Cannot read sshd config'; return 1; }
+ [[ -n "$current" ]] || { die 'No configured SSH ports'; return 1; }
+ printf 'EXISTING_PORTS:\n%s\n' "$current"
  port_listeners
- if printf '%s\n' "$effective" | grep -qx "$SSH_TARGET_PORT"; then info "SSH_CONFIG_${SSH_TARGET_PORT}: PASS / existing"; else
-   info 'NOTICE: This action adds the port to config ONLY; does not reload or restart SSH.'
-   confirm "Добавить SSH-порт $SSH_TARGET_PORT в конфигурацию?" || { info CANCELLED; return; }
-   local stamp file backup
-   stamp=$(date -u +%Y%m%dT%H%M%SZ)
-   file=/etc/ssh/sshd_config.d/00-routerforge-server-ports.conf
-   install -d -m 0755 /etc/ssh/sshd_config.d
-   backup="$STATE_DIR/backups/ssh-$stamp"
-   install -d -m 0700 "$backup"
-   cp -a /etc/ssh/sshd_config "$backup/sshd_config"
-   [[ ! -f "$file" ]] || cp -a "$file" "$backup/dropin.conf"
-   # Existing configured ports MUST remain. sshd will read this file only if Include is configured.
-   { printf '%s\n' "$effective" | awk '{print "Port " $1}'; printf 'Port %s\n' "$SSH_TARGET_PORT"; } | sort -u > "$file.tmp"
-   mv "$file.tmp" "$file"
-   if ! /usr/sbin/sshd -t || ! /usr/sbin/sshd -T | awk '$1=="port"{print $2}' | grep -qx "$SSH_TARGET_PORT"; then
-     [[ ! -f "$backup/dropin.conf" ]] && rm -f "$file" || cp -a "$backup/dropin.conf" "$file"
-     die 'New port not active in sshd config; reverted drop-in'; return 1
-   fi
-   info "SSH_CONFIG_${SSH_TARGET_PORT}: STAGED"
+ read -r -p 'Введите новый SSH-порт (1–65535, пусто — отмена): ' target || return 1
+ [[ -n "$target" ]] || { info 'CANCELLED'; return 0; }
+ [[ "$target" =~ ^[0-9]{1,5}$ ]] && ((10#$target>=1 && 10#$target<=65535)) || { die 'Invalid TCP port'; return 1; }
+ target=$((10#$target))
+ if printf '%s\n' "$current" | grep -qx "$target"; then
+   info "SSH_CONFIG_$target: PASS / already configured"
+   info 'SSH_SERVICE / SOCKET: UNTOUCHED'
+   return 0
  fi
- if ss -H -ltn '( sport = :2202 )' | grep -q LISTEN; then info 'LISTENER_2202: PASS'; else info 'LISTENER_2202: NOT ACTIVE / manual controlled activation required'; fi
- info 'SSH_SOCKET: UNTOUCHED'; info 'SSH_SERVICE: UNTOUCHED'; info 'SSH_OLD_PORTS: PRESERVED'
+ info "NEW_PORT: $target / existing ports preserved"
+ info 'Only sshd_config drop-in will be staged; no restart/reload, no UFW changes.'
+ confirm 'Подготовить конфигурацию SSH?' || { info CANCELLED; return 0; }
+ mkdir_state
+ install -d -m 0755 /etc/ssh/sshd_config.d
+ stamp=$(date -u +%Y%m%dT%H%M%SZ)
+ file=/etc/ssh/sshd_config.d/00-routerforge-server-ports.conf
+ backup="$STATE_DIR/backups/ssh-$stamp"
+ install -d -m 0700 "$backup"
+ cp -a /etc/ssh/sshd_config "$backup/sshd_config"
+ [[ ! -f "$file" ]] || cp -a "$file" "$backup/dropin.conf"
+ # Preserve the effective configured ports plus the new one.
+ temp=$(mktemp /etc/ssh/sshd_config.d/.rfs-ports.XXXXXXXX)
+ { printf '%s\n' "$current" | awk '{print "Port " $1}'; printf 'Port %s\n' "$target"; } | sort -u > "$temp"
+ chmod 0644 "$temp"
+ mv -f "$temp" "$file"
+ if ! /usr/sbin/sshd -t || ! /usr/sbin/sshd -T | awk '$1=="port"{print $2}' | grep -qx "$target"; then
+   if [[ -f "$backup/dropin.conf" ]]; then cp -a "$backup/dropin.conf" "$file"; else rm -f "$file"; fi
+   die 'SSH validation failed: restored original drop-in'; return 1
+ fi
+ info "SSH_CONFIG_$target: STAGED"
+ info 'LISTENER: unchanged; new port is NOT live until separately activated.'
+ info 'SSH_SOCKET / SSH_SERVICE / UFW: UNTOUCHED'
 }
 ufw_status(){ head 'FIREWALL / READ ONLY'; command -v ufw >/dev/null && ufw status verbose || info 'UFW unavailable'; }
 ufw_ssh(){
@@ -63,7 +78,6 @@ ufw_ssh(){
  printf '%s\n' "$ports"
  confirm 'Добавить ALLOW TCP для всех SSH-портов из конфига? UFW не будет включён' || return 0
  while read -r p; do [[ "$p" =~ ^[0-9]+$ ]] || continue; ufw allow "$p/tcp"; done <<< "$ports"
- ufw allow "$SSH_TARGET_PORT/tcp"
  head RESULT; info 'UFW SSH RULES: PASS / UFW enable unchanged'
 }
 # Dangerous policy is deliberately opt-in; disabling ICMP unreachables can break PMTUD.
@@ -175,6 +189,30 @@ PY
  scanner_filter "$report/raw.csv" "$report/filtered.csv" | tee "$report/summary.txt"
  head RESULT; info "REPORT: $report"; info 'STATE: PASS / REPORT WRITTEN'
 }
+rfs_check_update(){
+ local channel local_sha remote_sha response
+ channel=dev
+ [[ -r "$APP_DIR/channel" ]] && channel=$(cat "$APP_DIR/channel")
+ [[ "$channel" == dev || "$channel" == main ]] || { info 'RFS_UPDATE: UNKNOWN_CHANNEL'; return 0; }
+ local_sha=local
+ [[ -r "$APP_DIR/revision" ]] && local_sha=$(cat "$APP_DIR/revision")
+ if ! command -v curl >/dev/null || ! command -v python3 >/dev/null; then
+   info 'RFS_UPDATE: CHECK_UNAVAILABLE / dependencies missing'; return 0
+ fi
+ response=$(curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 3 --max-time 8 \
+   -H 'Accept: application/vnd.github+json' -H 'User-Agent: RouterForge-Server' \
+   "https://api.github.com/repos/Fifth-Ace/routerforge-server/commits/$channel" 2>/dev/null) || {
+     info 'RFS_UPDATE: OFFLINE / check skipped'; return 0;
+   }
+ remote_sha=$(printf '%s' "$response" | python3 -c 'import json,sys,re; s=json.load(sys.stdin).get("sha",""); print(s if re.fullmatch("[a-f0-9]{40}",s) else "")' 2>/dev/null) || true
+ [[ "$remote_sha" =~ ^[a-f0-9]{40}$ ]] || { info 'RFS_UPDATE: INVALID_RESPONSE'; return 0; }
+ if [[ "$local_sha" == "$remote_sha" ]]; then
+   info "RFS_UPDATE: CURRENT / $channel / ${local_sha:0:12}"
+ else
+   info "RFS_UPDATE: AVAILABLE / $channel / ${local_sha:0:12} -> ${remote_sha:0:12}"
+   info 'Обновление доступно: пункт 10 или rfs self-update (после подтверждения).'
+ fi
+}
 self_update(){
  root || return 1
  local channel
@@ -216,7 +254,7 @@ TXT
 }
 help_text(){ cat <<'TXT'
 RouterForge Server
-Usage: rfs [menu|status|update|ssh-prepare|ufw-status|ufw-ssh|ufw-icmp|scanner-install|scan|reports|self-update|filter CSV OUTPUT]
+Usage: rfs [menu|status|update|check-update|ssh-prepare|ufw-status|ufw-ssh|ufw-icmp|scanner-install|scan|reports|self-update|filter CSV OUTPUT]
 No root service is started automatically. No firewall activation or SSH restart.
 TXT
 }
@@ -224,8 +262,8 @@ main(){
  case "${1:-menu}" in
  menu) menu;; status) status;; update) updates;; ssh-prepare) ssh_prepare;; ufw-status) ufw_status;; ufw-ssh) ufw_ssh;; ufw-icmp) ufw_icmp;;
  scanner-install) scanner_install;; scan) scanner_run;; reports) reports;; self-update) self_update;; filter) [[ $# == 3 ]] || { help_text; return 2; }; scanner_filter "$2" "$3";;
- version|--version) echo "$VERSION";; help|--help|-h) help_text;; *) help_text; return 2;;
+ check-update) rfs_check_update;; version|--version) echo "$VERSION";; help|--help|-h) help_text;; *) help_text; return 2;;
  esac
 }
-if [[ -f "$APP_DIR/ui.sh" ]]; then source "$APP_DIR/ui.sh"; fi
+if [[ -f "$APP_DIR/ui.sh" ]]; then source "$APP_DIR/ui.sh"; elif [[ -f "$(dirname "${BASH_SOURCE[0]}")/ui.sh" ]]; then source "$(dirname "${BASH_SOURCE[0]}")/ui.sh"; fi
 main "$@"

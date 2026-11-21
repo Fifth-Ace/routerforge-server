@@ -8,4 +8,4 @@
 - RealiTLScanner install and 120-second neighboring IPv4 scan with issuer filtering.
 - Reserved compatibility surface for RouterForge Core/Portal integration.
 
-- P3: pinned-commit GitHub bootstrap, rfs self-update and idempotent installer; no SSH/UFW service actions.
+- P5: read-only automatic revision checks, configurable SSH port, Y/n prompts and LucX-UI menu installer.

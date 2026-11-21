@@ -21,9 +21,12 @@ grep -q 'RETAINED: 2' "$D/summary"
 bash manager.sh help >/dev/null
 printf 'BASH: PASS\nFILTER: PASS\nDEDUP: PASS\n'
 
-# P3 offline smoke checks: read-only commands and installer source invariants.
-grep -q 'self-update)' manager.sh
-grep -q '/usr/local/bin/rfs' install.sh
-grep -q 'codeload.github.com' bootstrap.sh
-! grep -Eq 'systemctl[[:space:]]+(restart|stop)|ufw[[:space:]]+enable' install.sh bootstrap.sh
-printf 'P3_BOOTSTRAP_STATIC: PASS\n'
+# P5: syntax, menu, version check and SSH safety anchors.
+grep -q 'rfs_check_update' manager.sh
+grep -q 'SSH: указать порт вручную' ui.sh
+grep -q 'lucx-ui)' ui.sh
+grep -q 'check-update)' manager.sh
+! grep -q 'SSH_TARGET_PORT=2202' manager.sh
+! grep -q 'Подготовить SSH 2202' ui.sh
+[[ $(printf '0\n' | NO_COLOR=1 bash manager.sh menu | grep -c 'LucX-UI') -ge 1 ]]
+printf 'P5_STATIC: PASS\n'

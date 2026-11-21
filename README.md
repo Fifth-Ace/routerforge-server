@@ -10,7 +10,7 @@ Ubuntu 24.04 amd64 (other distributions not yet tested); Bash, Python 3, OpenSSH
 
 ```bash
 sudo bash install.sh
-vps-manager
+rfs
 ```
 
 ## P4: Color menu and installers
@@ -39,8 +39,6 @@ rfs scan
 rfs filter raw.csv filtered.csv
 ```
 
-The previous command `vps-manager` remains available as a compatibility alias.
-
 ## Data and compatibility
 
 - Reports/backups: `/var/lib/routerforge-server/`.
@@ -53,16 +51,10 @@ The previous command `vps-manager` remains available as a compatibility alias.
 
 Do not paste arbitrary `curl | bash` commands to root. Clone the repository or download a pinned release, review/check its SHA256, then install. Self-update is available via `rfs self-update`; it updates only RouterForge Server program files.
 
-## Installation from GitHub (dev)
 
-Download the bootstrap script, inspect it, then execute. The bootstrap resolves the selected branch to a 40-character commit SHA, downloads source from that exact commit, checks Bash syntax and installs `rfs`.
+## P5: updates, SSH port, confirmations and LucX
 
-```bash
-curl -fsSLo /tmp/rfs-bootstrap.sh https://raw.githubusercontent.com/Fifth-Ace/routerforge-server/dev/bootstrap.sh
-sudo bash /tmp/rfs-bootstrap.sh --channel=dev --install
-rfs
-```
-
-To update the installed CLI without touching system services, choose item 10 or run `rfs self-update`. The legacy command `vps-manager` remains available. `main` is not published as a production installer until stable promotion.
-
-GitHub HTTPS and the selected repository branch are the trust root. Pin the bootstrap URL to a reviewed commit for additional reproducibility. A commit SHA is not a signature; independent release signing is future work.
+- `rfs` performs a read-only GitHub `dev`/`main` revision check on opening the menu; **no auto-install**. `rfs check-update` repeats the check, `rfs self-update` installs after confirmation. If offline, the menu still works.
+- SSH preparation prompts for a TCP port (1–65535). No port is preselected, and no SSH/socket restart or firewall change occurs automatically. Previously configured ports remain; activation needs a separate verified procedure.
+- Prompts use `Y/n`; Enter defaults to Yes. Always read the action description first.
+- LucX-UI is listed immediately after classic 3x-ui. Because both use x-ui paths and services, installation is blocked if either panel exists; migration requires a separate backup workflow. Installer source: `AlexeyLCP/lucx-ui`.
