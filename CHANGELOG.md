@@ -15,3 +15,4 @@
 
 - P8: live RealiTLScanner log tail, deadline countdown, and Ctrl+C cleanup.
 - P8 v2: restart RFS UI immediately after verified successful self-update, preserving SSH session.
+- P9: fix reports menu/head shadowing; interactive report viewer, compact scan live feed and accurate completion status; optional Country.mmdb installation.

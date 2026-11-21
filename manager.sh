@@ -9,7 +9,7 @@ LOG_DIR=/var/log/routerforge-server
 SCAN_SECONDS=120
 SCAN_THREADS=2
 mkdir_state(){ install -d -m 0750 "$STATE_DIR" "$STATE_DIR/reports" "$STATE_DIR/backups" "$LOG_DIR"; }
-head(){ printf '\n=== %s ===\n' "$*"; }
+rfs_heading(){ printf '\n=== %s ===\n' "$*"; }
 info(){ printf '%s\n' "$*"; }
 die(){ printf 'STATE: FAIL / %s\n' "$*" >&2; return 1; }
 root(){ (( EUID == 0 )) || { die 'root required'; return 1; }; }
@@ -21,17 +21,17 @@ confirm(){
 }
 port_listeners(){ ss -H -ltnp 2>/dev/null | grep -E ':(22|222|2202)([[:space:]]|$)' || true; }
 status(){
- head 'PRECHECK / READ ONLY'; cat /etc/os-release | grep '^PRETTY_NAME=' || true
- head SSH; /usr/sbin/sshd -T 2>/dev/null | awk '$1=="port"{print}' || true; port_listeners
- head UFW; if command -v ufw >/dev/null; then ufw status verbose; else info 'UFW: missing'; fi
- head NETWORK; ip -4 route show default || true
- head RESULT; info 'STATE: PASS / NO CHANGES'
+ rfs_heading 'PRECHECK / READ ONLY'; printf 'RFS_VERSION: %s\n' "$VERSION"; sed -n 's/^PRETTY_NAME=/OS: /p' /etc/os-release || true
+ rfs_heading SSH; /usr/sbin/sshd -T 2>/dev/null | awk '$1=="port"{print}' || true; port_listeners
+ rfs_heading UFW; if command -v ufw >/dev/null; then ufw status verbose; else info 'UFW: missing'; fi
+ rfs_heading NETWORK; ip -4 route show default || true
+ rfs_heading RESULT; info 'STATE: PASS / NO CHANGES'
 }
-updates(){ root || return 1; ubuntu || return 1; head 'PRECHECK / APT'; confirm 'Выполнить apt update + upgrade без вопросов?' || { info 'CANCELLED'; return; }; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l; apt-get update && apt-get -y -o Dpkg::Options::=--force-confold upgrade; head RESULT; info 'APT: PASS'; }
+updates(){ root || return 1; ubuntu || return 1; rfs_heading 'PRECHECK / APT'; confirm 'Выполнить apt update + upgrade без вопросов?' || { info 'CANCELLED'; return; }; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l; apt-get update && apt-get -y -o Dpkg::Options::=--force-confold upgrade; rfs_heading RESULT; info 'APT: PASS'; }
 ssh_prepare(){
  root || return 1
  command -v /usr/sbin/sshd >/dev/null 2>&1 || [[ -x /usr/sbin/sshd ]] || { die 'sshd missing'; return 1; }
- head 'PRECHECK / SSH / CONFIG ONLY'
+ rfs_heading 'PRECHECK / SSH / CONFIG ONLY'
  # Read-only preflight. Do not create /run/sshd or restart sockets.
  local current target stamp file backup temp
  current=$(/usr/sbin/sshd -T 2>/dev/null | awk '$1=="port" {print $2}' | sort -nu) || { die 'Cannot read sshd config'; return 1; }
@@ -71,20 +71,20 @@ ssh_prepare(){
  info 'LISTENER: unchanged; new port is NOT live until separately activated.'
  info 'SSH_SOCKET / SSH_SERVICE / UFW: UNTOUCHED'
 }
-ufw_status(){ head 'FIREWALL / READ ONLY'; command -v ufw >/dev/null && ufw status verbose || info 'UFW unavailable'; }
+ufw_status(){ rfs_heading 'FIREWALL / READ ONLY'; command -v ufw >/dev/null && ufw status verbose || info 'UFW unavailable'; }
 ufw_ssh(){
  root || return 1; command -v ufw >/dev/null || { die 'Install ufw first'; return 1; }
- head 'PRECHECK / SSH PORTS'; local ports; ports=$(/usr/sbin/sshd -T | awk '$1=="port"{print $2}' | sort -nu)
+ rfs_heading 'PRECHECK / SSH PORTS'; local ports; ports=$(/usr/sbin/sshd -T | awk '$1=="port"{print $2}' | sort -nu)
  printf '%s\n' "$ports"
  confirm 'Добавить ALLOW TCP для всех SSH-портов из конфига? UFW не будет включён' || return 0
  while read -r p; do [[ "$p" =~ ^[0-9]+$ ]] || continue; ufw allow "$p/tcp"; done <<< "$ports"
- head RESULT; info 'UFW SSH RULES: PASS / UFW enable unchanged'
+ rfs_heading RESULT; info 'UFW SSH RULES: PASS / UFW enable unchanged'
 }
 # Dangerous policy is deliberately opt-in; disabling ICMP unreachables can break PMTUD.
 ufw_icmp(){
  root || return 1; command -v iptables-restore >/dev/null || { die 'iptables-restore missing'; return 1; }
  [[ -f /etc/ufw/before.rules ]] || { die '/etc/ufw/before.rules missing'; return 1; }
- head 'SECURITY / ICMP RULES'; info 'WARNING: DROP destination-unreachable/time-exceeded may break PMTUD and network diagnostics.'
+ rfs_heading 'SECURITY / ICMP RULES'; info 'WARNING: DROP destination-unreachable/time-exceeded may break PMTUD and network diagnostics.'
  confirm 'Установить 10 DROP ICMP-правил (INPUT + FORWARD) как на скриншоте?' || { info CANCELLED; return; }
  mkdir_state; local stamp tmp; stamp=$(date -u +%Y%m%dT%H%M%SZ); tmp=$(mktemp)
  cp -a /etc/ufw/before.rules "$STATE_DIR/backups/before.rules.$stamp"
@@ -112,12 +112,12 @@ PY
    info 'UFW ACTIVE: rules written; live reload requires separate approval.'
    if confirm 'Применить правила командой ufw reload?'; then ufw reload; fi
  else info 'UFW INACTIVE: rules staged only'; fi
- head RESULT; info 'ICMP_RULES: 10 / STAGED'; info "BACKUP: $STATE_DIR/backups/before.rules.$stamp"
+ rfs_heading RESULT; info 'ICMP_RULES: 10 / STAGED'; info "BACKUP: $STATE_DIR/backups/before.rules.$stamp"
 }
 scanner_install(){
  root || return 1; ubuntu || return 1
  command -v curl >/dev/null && command -v python3 >/dev/null && command -v file >/dev/null || { die 'Requires curl, python3 and file; install packages first'; return 1; }
- head 'SCANNER / INSTALL'; confirm 'Загрузить сканер XTLS/RealiTLScanner из GitHub Releases?' || return 0
+ rfs_heading 'SCANNER / INSTALL'; confirm 'Загрузить сканер XTLS/RealiTLScanner из GitHub Releases?' || return 0
  mkdir_state; local tmp tag url name; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
  python3 - "$tmp" <<'PY'
 import json,urllib.request,re,pathlib,sys
@@ -142,7 +142,7 @@ PY
  [[ "$(od -An -tx1 -N4 "$tmp/scanner" | tr -d ' \n')" == 7f454c46 ]] || { die 'Downloaded executable not ELF'; return 1; }
  install -d -m 0755 "$APP_DIR/bin"; install -m 0755 "$tmp/scanner" "$APP_DIR/bin/RealiTLScanner"
  printf '%s\n' "$tag" > "$APP_DIR/bin/scanner-version"
- head RESULT; info "SCANNER_INSTALLED: $tag"
+ rfs_heading RESULT; info "SCANNER_INSTALLED: $tag"
 }
 scanner_filter(){
  local src=$1 output=$2
@@ -232,39 +232,92 @@ scanner_select_seconds(){
 }
 # P8: Follow scanner.log while running, with a live countdown.
 # The full log is always written to the report, regardless of terminal capabilities.
+# P9: optional Country.mmdb; called explicitly or offered if missing.
+# Source is the GeoIP link documented by XTLS/RealiTLScanner.
+scanner_geoip_install(){
+ root || return 1
+ local dest="$APP_DIR/bin/Country.mmdb" temp size sha
+ if [[ -f "$dest" ]]; then
+   confirm 'Country.mmdb уже существует. Обновить базу GeoIP?' || { info CANCELLED; return 0; }
+ else
+   confirm 'Загрузить базу Country.mmdb для определения страны IP?' || { info CANCELLED; return 0; }
+ fi
+ command -v curl >/dev/null && command -v python3 >/dev/null && command -v sha256sum >/dev/null || { die 'Requires curl, python3, sha256sum'; return 1; }
+ install -d -m 0755 "$APP_DIR/bin"
+ temp=$(mktemp "$APP_DIR/bin/.Country.mmdb.XXXXXXXX") || return 1
+ if ! curl --proto '=https' --tlsv1.2 -fL --retry 2 --connect-timeout 15 --max-time 180 \
+   'https://github.com/Loyalsoldier/geoip/releases/latest/download/Country.mmdb' -o "$temp"; then
+   rm -f -- "$temp"; die 'GeoIP download failed'; return 1
+ fi
+ if ! python3 - "$temp" <<'PYMMDB'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]); size=p.stat().st_size
+assert 100_000 <= size <= 100_000_000, 'Unexpected Country.mmdb size'
+with p.open('rb') as f:
+    f.seek(max(0,size-131072)); tail=f.read()
+assert b'\xab\xcd\xefMaxMind.com' in tail, 'Missing MaxMind DB metadata marker'
+print('GEOIP_FORMAT: PASS / MAXMIND_DB_METADATA')
+PYMMDB
+ then
+   rm -f -- "$temp"; die 'GeoIP database format invalid'; return 1
+ fi
+ chmod 0644 "$temp"
+ sha=$(sha256sum "$temp" | awk '{print $1}')
+ mv -f -- "$temp" "$dest"
+ info "GEOIP_INSTALLED: $dest"
+ info "GEOIP_SHA256: $sha (download fingerprint, not a publisher signature)"
+}
 rfs_scan_render(){
  local start=$1 duration=$2 log=$3 network=$4 source_ip=$5 worker=$6 final=${7:-0}
- local elapsed remaining width=24 filled empty bar count now tailtext
+ local elapsed remaining width=24 filled empty bar shade now
  now=$(date +%s)
  elapsed=$((now-start)); ((elapsed<0)) && elapsed=0
  remaining=$((duration-elapsed)); ((remaining<0)) && remaining=0
  filled=$((elapsed*width/duration)); ((filled>width)) && filled=$width
  empty=$((width-filled))
  printf -v bar '%*s' "$filled" ''; bar=${bar// /█}
- printf -v tailtext '%*s' "$empty" ''; tailtext=${tailtext// /░}
+ printf -v shade '%*s' "$empty" ''; shade=${shade// /░}
  if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
    printf '\033[H\033[2J'
-   if [[ -z "${NO_COLOR:-}" ]]; then
-     printf '\033[1;96m RF SERVER / TLS SCANNER\033[0m\n'
-   else
-     printf ' RF SERVER / TLS SCANNER\n'
-   fi
- else
-   printf '\n=== RF SERVER / TLS SCANNER ===\n'
  fi
- printf ' Сеть: %s | выбран IP: %s\n' "$network" "$source_ip"
- printf ' Прошло: %ds | Осталось: %ds | Лимит: %ds\n' "$elapsed" "$remaining" "$duration"
- printf ' [%s%s] %d%%\n' "$bar" "$tailtext" "$((filled*100/width))"
- if [[ "$final" == 1 ]]; then
-   printf ' Статус: ЗАВЕРШЕНО\n'
- elif kill -0 "$worker" 2>/dev/null; then
-   printf ' Статус: СКАНИРОВАНИЕ... (Ctrl+C для остановки)\n'
+ printf '\n\033[1;96m RF SERVER / TLS SCANNER\033[0m\n'
+ printf ' Сеть: %-18s | VPS IP: %s\n' "$network" "$source_ip"
+ printf ' Прошло: %ds  |  Осталось: %ds  |  Лимит: %ds\n' "$elapsed" "$remaining" "$duration"
+ if [[ "$final" == 0 ]]; then
+   printf ' [%s%s] %d%% лимита времени\n' "$bar" "$shade" "$((elapsed*100/duration))"
+   printf ' Статус: СКАНИРОВАНИЕ (Ctrl+C — остановка)\n'
+ elif [[ "$final" == 1 ]]; then
+   printf ' Статус: ЗАВЕРШЕНО / фактически %d сек.\n' "$elapsed"
+ elif [[ "$final" == 124 ]]; then
+   printf ' Статус: ЛИМИТ ВРЕМЕНИ / %d сек.\n' "$elapsed"
  else
-   printf ' Статус: ЗАВЕРШЕНИЕ...\n'
+   printf ' Статус: ПРЕРВАНО ИЛИ ОШИБКА / код %s\n' "$final"
  fi
- printf '%s\n' ' ───── ПОСЛЕДНИЕ СООБЩЕНИЯ СКАНЕРА ─────'
- if [[ -s "$log" ]]; then tail -n 10 "$log"; else printf ' Ожидание сообщений RealiTLScanner...\n'; fi
- printf '%s\n' ' ────────────────────────────────────────'
+ # Reformat scanner's long key=value logs to compact fixed-width rows;
+ # the original unmodified log always remains in scanner.log.
+ python3 - "$log" <<'PYLOG'
+from collections import deque
+from pathlib import Path
+import re,sys
+p=Path(sys.argv[1]); rows=deque(maxlen=7); total=0; last='нет'
+if p.is_file():
+    for line in p.open(encoding='utf-8', errors='replace'):
+        if 'msg="Connected to target"' not in line: continue
+        total+=1
+        def get(k):
+            match=re.search(r'(?<![\w-])'+re.escape(k)+r'=(?:"([^"]*)"|([^\s]+))',line)
+            return ((match.group(1) or match.group(2)) if match else '-')
+        tm=re.search(r'time=([^\s]+)',line)
+        last=tm.group(1)[11:19] if tm else 'есть'
+        rows.append((get('ip'),get('cert-domain'),get('cert-issuer')))
+print(f' Успешных TLS-подключений: {total} | Последняя активность: {last}')
+print(' ─── IP ──────────── ДОМЕН ─────────────────────── ИЗДАТЕЛЬ ──────────')
+if not rows: print(' Ожидание успешных TLS-подключений...')
+for ip,domain,issuer in rows:
+    print(f' {ip:<15.15}  {domain:<29.29}  {issuer:<22.22}')
+print(' ─────────────────────────────────────────────────────────────────────')
+PYLOG
 }
 scanner_run(){ (
  root || exit 1
@@ -272,7 +325,7 @@ scanner_run(){ (
  command -v timeout >/dev/null || { die 'timeout missing'; exit 1; }
  local cidr stamp report rc=0 worker='' start elapsed next_log=0
  local SCAN_SELECTED_IP= SCAN_SELECTED_SECONDS=
- head 'SCANNER / SCOPE'
+ rfs_heading 'SCANNER / SCOPE'
  scanner_select_ip || { info 'SCANNER: CANCELLED / no network changes'; exit 0; }
  scanner_select_seconds || { info 'SCANNER: CANCELLED'; exit 0; }
  cidr=$(python3 - "$SCAN_SELECTED_IP" <<'PYIP'
@@ -287,15 +340,18 @@ PYIP
  info 'ATTENTION: selected IP defines /24 scope, NOT outbound source IP.'
  info 'Neighboring addresses may belong to other clients; provider permission is required.'
  confirm "Запустить сканирование $cidr на TCP 443?" || { info CANCELLED; exit 0; }
+ if [[ ! -f "$APP_DIR/bin/Country.mmdb" ]]; then
+   scanner_geoip_install || info 'GEOIP: unavailable / scan continues without it'
+ fi
  mkdir_state
  stamp=$(date -u +%Y%m%dT%H%M%SZ)
  report="$STATE_DIR/reports/${stamp}-${SCAN_SELECTED_IP//./-}"
  install -d -m 0750 "$report"
  printf 'selected_ip=%s\ntarget_cidr=%s\nscan_seconds=%s\n' "$SCAN_SELECTED_IP" "$cidr" "$SCAN_SELECTED_SECONDS" > "$report/scope.txt"
  : > "$report/scanner.log"
- timeout --signal=INT --kill-after=5 "${SCAN_SELECTED_SECONDS}s" \
-   "$APP_DIR/bin/RealiTLScanner" -addr "$cidr" -port 443 \
-   -thread "$SCAN_THREADS" -timeout 5 -out "$report/raw.csv" > "$report/scanner.log" 2>&1 &
+ (cd "$APP_DIR/bin" && exec timeout --signal=INT --kill-after=5 "${SCAN_SELECTED_SECONDS}s" \
+   ./RealiTLScanner -addr "$cidr" -port 443 \
+   -thread "$SCAN_THREADS" -timeout 5 -out "$report/raw.csv") > "$report/scanner.log" 2>&1 &
  worker=$!
  # Keep traps inside the scanner subshell; never mutate the main menu's traps.
  trap '[[ -z "$worker" ]] || { kill -TERM "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; }; exit 130' INT
@@ -319,7 +375,7 @@ PYIP
  worker=''
  trap - INT TERM EXIT
  if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
-   rfs_scan_render "$start" "$SCAN_SELECTED_SECONDS" "$report/scanner.log" "$cidr" "$SCAN_SELECTED_IP" 0 1
+   rfs_scan_render "$start" "$SCAN_SELECTED_SECONDS" "$report/scanner.log" "$cidr" "$SCAN_SELECTED_IP" 0 "$([[ $rc == 0 ]] && echo 1 || echo "$rc")"
  fi
  info "SCANNER_EXIT_CODE: $rc"
  if [[ "$rc" != 0 && "$rc" != 124 && "$rc" != 130 ]]; then
@@ -327,7 +383,7 @@ PYIP
  fi
  [[ -f "$report/raw.csv" ]] || { die "Scanner produced no CSV: $report/scanner.log"; exit 1; }
  scanner_filter "$report/raw.csv" "$report/filtered.csv" | tee "$report/summary.txt"
- head RESULT; info "REPORT: $report"; info 'STATE: PASS / REPORT WRITTEN'
+ rfs_heading RESULT; info "REPORT: $report"; info 'STATE: PASS / REPORT WRITTEN'
 ) }
 
 # Read-only update probe. A semantic version alone cannot distinguish dev builds:
@@ -406,13 +462,47 @@ self_update(){
  if [[ -f "$APP_DIR/channel" ]]; then channel=$(cat "$APP_DIR/channel"); fi
  [[ "$channel" == dev || "$channel" == main ]] || { die 'Unknown installed channel. Reinstall from GitHub first'; return 1; }
  [[ -f "$APP_DIR/bootstrap.sh" ]] || { die 'Bootstrap not installed'; return 1; }
- head 'UPDATE / ROUTERFORGE SERVER'
+ rfs_heading 'UPDATE / ROUTERFORGE SERVER'
  info "CHANNEL: $channel"
  info 'Only program files are replaced. SSH, UFW and system services are untouched.'
  confirm "Обновить RouterForge Server из $channel?" || { info CANCELLED; return 0; }
  bash "$APP_DIR/bootstrap.sh" --update "--channel=$channel"
 }
-reports(){ head 'REPORTS'; if [[ -d "$STATE_DIR/reports" ]]; then find "$STATE_DIR/reports" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r | head -20; else info 'No reports'; fi; }
+reports(){
+ rfs_heading 'REPORTS / READ ONLY'
+ local -a names=()
+ local i choice selected rootpath
+ [[ -d "$STATE_DIR/reports" ]] || { info 'Отчётов пока нет'; return 0; }
+ mapfile -t names < <(find "$STATE_DIR/reports" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r | /usr/bin/head -n 20)
+ ((${#names[@]})) || { info 'Отчётов пока нет'; return 0; }
+ for ((i=0;i<${#names[@]};i++)); do
+   printf ' [%2d] %s\n' "$((i+1))" "${names[i]}"
+ done
+ read -r -p 'Номер отчёта [0 — назад]: ' choice || return 0
+ choice=${choice:-0}
+ [[ "$choice" == 0 ]] && return 0
+ [[ "$choice" =~ ^[0-9]{1,2}$ ]] && ((10#$choice>=1 && 10#$choice<=${#names[@]})) || { info 'Неверный номер отчёта'; return 1; }
+ selected=${names[10#$choice-1]}
+ rootpath="$STATE_DIR/reports/$selected"
+ [[ -d "$rootpath" && ! -L "$rootpath" ]] || { die 'Report directory unavailable'; return 1; }
+ rfs_heading "REPORT / $selected"
+ if [[ -f "$rootpath/scope.txt" && ! -L "$rootpath/scope.txt" ]]; then
+   info '=== ПАРАМЕТРЫ СКАНИРОВАНИЯ ==='
+   cat -- "$rootpath/scope.txt"
+ fi
+ if [[ -f "$rootpath/summary.txt" && ! -L "$rootpath/summary.txt" ]]; then
+   info '=== РЕЗУЛЬТАТЫ (БЕЗ LETS ENCRYPT) ==='
+   cat -- "$rootpath/summary.txt"
+ else
+   info 'SUMMARY: отсутствует (сканирование могло быть прервано)'
+ fi
+ if [[ -f "$rootpath/scanner.log" && ! -L "$rootpath/scanner.log" ]]; then
+   info '=== ЗАВЕРШЕНИЕ / ПОСЛЕДНИЕ СОБЫТИЯ ==='
+   grep -E 'Scanning completed|level=(WARN|ERROR)' "$rootpath/scanner.log" | tail -n 5 || true
+ fi
+ info "REPORT_PATH: $rootpath"
+}
+
 menu(){
  while :; do
   printf '\nRouterForge Server %s\n' "$VERSION"
@@ -434,6 +524,7 @@ TXT
    1) status || true;; 2) updates || true;; 3) ssh_prepare || true;;
    4) ufw_status || true;; 5) ufw_ssh || true;; 6) ufw_icmp || true;;
    7) scanner_install || true;; 8) scanner_run || true;; 9) reports || true;;
+   16) scanner_geoip_install || true;;
    10) self_update || true;; 0) break;; *) info 'Неизвестный пункт';;
   esac
  done

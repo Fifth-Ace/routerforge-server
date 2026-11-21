@@ -104,7 +104,8 @@ result=$(bash -c '
 grep -q 'Проверка обновлений недоступна' <<< "$result"
 grep -q 'STATE=unavailable' <<< "$result"
 grep -q 'rfs_update_refresh' ui.sh
-grep -q 'read -r -t 30' ui.sh
+grep -q 'read -r -t 300' ui.sh
+! grep -q 'read -r -t 30 ' ui.sh
 printf 'P7_VERSION_COMPARE: PASS\n'
 
 # P7v2: Enter alone must exit the main menu (non-TTY smoke).
@@ -116,8 +117,8 @@ printf 'P7_DEFAULT_EXIT: PASS\n'
 
 # P8: progress countdown and log tail invariants (read-only mock).
 grep -q 'rfs_scan_render' manager.sh
-grep -q 'ПОСЛЕДНИЕ СООБЩЕНИЯ СКАНЕРА' manager.sh
-grep -q 'tail -n 10' manager.sh
+grep -q 'Успешных TLS-подключений' manager.sh
+grep -q 'Успешных TLS-подключений' manager.sh
 grep -q 'trap - INT TERM EXIT' manager.sh
 grep -q 'scanner.log' manager.sh
 printf 'P8_LIVE_PROGRESS_STATIC: PASS\n'
@@ -150,3 +151,25 @@ MOCK
 # Avoid starting any app: test only the subshell restart signal.
 printf '10\n' | bash "$D/restart-fixture.sh" "$PWD/manager.sh" "$D" >/dev/null
 printf 'P8_SELF_UPDATE_REEXEC: PASS\n'
+
+# P9 regression checks: head must resolve to the system utility; report viewing is read-only.
+! grep -q '^head(){' manager.sh
+grep -q '^rfs_heading(){' manager.sh
+grep -q 'scanner_geoip_install' manager.sh
+grep -q 'Country.mmdb' manager.sh
+grep -q 'Установить / обновить базу GeoIP' ui.sh
+mkdir -p "$D/report-fixture/reports/20261121T155654Z-81-29-155-200"
+printf 'selected_ip=81.29.155.200\n' > "$D/report-fixture/reports/20261121T155654Z-81-29-155-200/scope.txt"
+printf 'RETAINED: 14 / LETS_ENCRYPT_EXCLUDED: 20\n' > "$D/report-fixture/reports/20261121T155654Z-81-29-155-200/summary.txt"
+result=$(printf '1\n' | bash -c 'source "$1"; STATE_DIR="$2"; reports' _ "$D/manager-lib.sh" "$D/report-fixture")
+grep -q 'RETAINED: 14' <<< "$result"
+grep -q '81.29.155.200' <<< "$result"
+result=$(printf '0\n' | bash -c 'source "$1"; STATE_DIR="$2"; reports' _ "$D/manager-lib.sh" "$D/report-fixture")
+! grep -q 'RETAINED: 14' <<< "$result"
+log="$D/mockscanner.log"
+printf '%s\n' 'time=2026-11-21T15:57:55.452Z level=INFO msg="Connected to target" feasible=true ip=81.29.155.174 cert-domain=example.org cert-issuer="Lets Encrypt"' > "$log"
+result=$(NO_COLOR=1 bash -c 'source "$1"; rfs_scan_render "$(($(date +%s)-2))" 120 "$2" 81.29.155.0/24 81.29.155.200 0 1' _ "$D/manager-lib.sh" "$log")
+grep -q 'Успешных TLS-подключений: 1' <<< "$result"
+grep -q 'ЗАВЕРШЕНО' <<< "$result"
+! grep -q '66% лимита времени' <<< "$result"
+printf 'P9_REPORTS_AND_PROGRESS: PASS\n'

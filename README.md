@@ -84,3 +84,10 @@ The P6 banner uses built-in 7-row block letters “RF SERVER” with optional AN
 ## P8 v2: in-process update handoff
 
 After a successful RFS update changes the installed revision, the menu restores the terminal and uses `exec /opt/routerforge-server/manager.sh menu` to start the new code in the same SSH session. Cancelled/failed/no-change updates keep the old menu open.
+
+## P9: TLS report browser, compact progress and GeoIP
+
+- Fixed Bash function `head()` shadowing the standard `/usr/bin/head` (renamed to `rfs_heading`); menu item 9 now selects and reads stored scans, scope and filtered summary. Report files are never edited.
+- Progress screen shows successful TLS connections and compact `IP | domain | issuer` rows; timeout progress is explicitly labeled elapsed time. Normal completion uses final `ЗАВЕРШЕНО`, error or timeout use distinct statuses. Raw `scanner.log` remains intact.
+- Optional Country.mmdb installer from `Loyalsoldier/geoip` GitHub release, the source linked by XTLS/RealiTLScanner. Size and MaxMind metadata marker are checked; the downloaded file SHA256 is logged, but this is not independent publisher attestation.
+- RealiTLScanner runs from its bin directory to locate `Country.mmdb`. The database is opt-in and can be refreshed from menu item 16; if it cannot be installed, scanning still works without GeoIP data.

@@ -44,6 +44,10 @@ rfs_banner(){
  printf '%s%s%s\n' "$c_low" '  █   █ █        ████  █████ █   █   █   █████ █   █' "$RFS_RESET"
  printf '%s%s%s\n' "$c_shadow" '   ▀   ▀ ▀        ▀▀▀▀  ▀▀▀▀▀ ▀   ▀   ▀   ▀▀▀▀▀ ▀   ▀' "$RFS_RESET"
  printf '  %sRouterForge Server%s  %s%s%s\n' "$RFS_BOLD" "$RFS_RESET" "$RFS_DIM" "$VERSION" "$RFS_RESET"
+ local revision=local channel=dev
+ [[ ! -r "$APP_DIR/revision" ]] || read -r revision < "$APP_DIR/revision"
+ [[ ! -r "$APP_DIR/channel" ]] || read -r channel < "$APP_DIR/channel"
+ printf '  %sСборка: %s  |  Канал: %s%s\n' "$RFS_DIM" "${revision:0:12}" "$channel" "$RFS_RESET"
 }
 rfs_draw_menu(){
  rfs_redraw
@@ -59,6 +63,7 @@ rfs_draw_menu(){
  rfs_title 'СКАНИРОВАНИЕ И ОТЧЁТЫ'
  rfs_option 7 'Установить RealiTLScanner'; rfs_option 8 'Сканировать соседнюю сеть /24 (IP + время)'
  rfs_option 9 'Посмотреть отчёты'
+  rfs_option 16 'Установить / обновить базу GeoIP Country.mmdb'
  rfs_title 'УСТАНОВКА СЕРВИСОВ'
  rfs_option 11 'Классический 3x-ui (MHSanaei)'
  rfs_option 12 'LucX-UI (AlexeyLCP)'
@@ -103,20 +108,31 @@ rfs_menu(){
    rfs_update_refresh
    rfs_draw_menu
    if [[ "${RFS_TUI_ACTIVE:-0}" == 1 ]]; then
-     if read -r -t 30 -p 'Выбор [0 — выход]: ' choice; then
-       rc=0
-     else
+     # Check every five minutes without redrawing unchanged menu every 30 seconds.
+     # Do not repeat the prompt on silent timeout (a TTY read retains cursor).
+     local prompt='Выбор [0 — выход]: ' old_status new_status
+     while :; do
+       if read -r -t 300 -p "$prompt" choice; then
+         rc=0
+         break
+       fi
        rc=$?
-     fi
+       if (( rc <= 128 )); then break; fi
+       old_status=$(rfs_update_status_text)
+       rfs_update_refresh 1
+       new_status=$(rfs_update_status_text)
+       if [[ "$old_status" != "$new_status" ]]; then
+         rfs_draw_menu
+         prompt='Выбор [0 — выход]: '
+       else
+         prompt=''
+       fi
+     done
    else
      read -r -p 'Выбор [0 — выход]: ' choice || break
      rc=0
    fi
-   if [[ "${RFS_TUI_ACTIVE:-0}" == 1 && "$rc" != 0 ]]; then
-     # Bash uses statuses >128 for timeout, 1 for EOF/disconnected input.
-     if (( rc > 128 )); then continue; fi
-     break
-   fi
+   [[ "$rc" == 0 ]] || break
    # Empty Enter exits the main menu; timeout/EOF above never implies selection.
    choice=${choice:-0}
    [[ "$choice" == 0 ]] && break
@@ -127,6 +143,7 @@ rfs_menu(){
     1) status || true;; 2) updates || true;; 3) ssh_prepare || true;;
     4) ufw_status || true;; 5) ufw_ssh || true;; 6) ufw_icmp || true;;
     7) scanner_install || true;; 8) scanner_run || true;; 9) reports || true;;
+    16) scanner_geoip_install || true;;
     10)
       before_revision=$(cat "$APP_DIR/revision" 2>/dev/null || printf 'unknown')
       if self_update; then
@@ -183,7 +200,7 @@ rfs_install_third_party(){
   *) die 'Unknown installer'; return 1;;
  esac
  command -v curl >/dev/null || { die 'curl не установлен'; return 1; }
- head "THIRD-PARTY / $name"
+ rfs_heading "THIRD-PARTY / $name"
  info "SOURCE: $ref"
  info "URL: $url"
  info 'Внешний установщик может изменить firewall, Docker, сервисы и порты.'
