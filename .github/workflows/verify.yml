@@ -1,0 +1,12 @@
+name: Verify
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+jobs:
+  bash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and CSV tests
+        run: bash tests/test.sh

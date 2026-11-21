@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# RouterForge Server - standalone Ubuntu CLI manager
+set -Eeuo pipefail
+VERSION=0.1.0-dev
+APP_DIR=/opt/routerforge-server
+STATE_DIR=/var/lib/routerforge-server
+CONF_DIR=/etc/routerforge-server
+LOG_DIR=/var/log/routerforge-server
+SCAN_SECONDS=120
+SCAN_THREADS=2
+SSH_TARGET_PORT=2202
+mkdir_state(){ install -d -m 0750 "$STATE_DIR" "$STATE_DIR/reports" "$STATE_DIR/backups" "$LOG_DIR"; }
+head(){ printf '\n=== %s ===\n' "$*"; }
+info(){ printf '%s\n' "$*"; }
+die(){ printf 'STATE: FAIL / %s\n' "$*" >&2; return 1; }
+root(){ (( EUID == 0 )) || { die 'root required'; return 1; }; }
+ubuntu(){ [[ -f /etc/os-release ]] || { die 'Missing os-release'; return 1; }; . /etc/os-release; [[ "${ID:-}" == ubuntu ]] || { die 'Ubuntu required'; return 1; }; }
+confirm(){ local reply; read -r -p "$1 [введите ДА]: " reply; [[ "$reply" == 'ДА' ]]; }
+port_listeners(){ ss -H -ltnp 2>/dev/null | grep -E ':(22|222|2202)([[:space:]]|$)' || true; }
+status(){
+ head 'PRECHECK / READ ONLY'; cat /etc/os-release | grep '^PRETTY_NAME=' || true
+ head SSH; /usr/sbin/sshd -T 2>/dev/null | awk '$1=="port"{print}' || true; port_listeners
+ head UFW; if command -v ufw >/dev/null; then ufw status verbose; else info 'UFW: missing'; fi
+ head NETWORK; ip -4 route show default || true
+ head RESULT; info 'STATE: PASS / NO CHANGES'
+}
+updates(){ root || return 1; ubuntu || return 1; head 'PRECHECK / APT'; confirm 'Выполнить apt update + upgrade без вопросов?' || { info 'CANCELLED'; return; }; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l; apt-get update && apt-get -y -o Dpkg::Options::=--force-confold upgrade; head RESULT; info 'APT: PASS'; }
+ssh_prepare(){
+ root || return 1; command -v sshd >/dev/null || [[ -x /usr/sbin/sshd ]] || { die 'sshd missing'; return 1; }
+ mkdir_state
+ head 'PRECHECK / SSH'; install -d -m 0755 /run/sshd
+ /usr/sbin/sshd -t || { die 'SSHD syntax invalid before changes'; return 1; }
+ local effective; effective=$(/usr/sbin/sshd -T | awk '$1=="port"{print $2}' | sort -nu)
+ printf 'EXISTING_PORTS:\n%s\n' "$effective"
+ port_listeners
+ if printf '%s\n' "$effective" | grep -qx "$SSH_TARGET_PORT"; then info "SSH_CONFIG_${SSH_TARGET_PORT}: PASS / existing"; else
+   info 'NOTICE: This action adds the port to config ONLY; does not reload or restart SSH.'
+   confirm "Добавить SSH-порт $SSH_TARGET_PORT в конфигурацию?" || { info CANCELLED; return; }
+   local stamp file backup
+   stamp=$(date -u +%Y%m%dT%H%M%SZ)
+   file=/etc/ssh/sshd_config.d/00-routerforge-server-ports.conf
+   install -d -m 0755 /etc/ssh/sshd_config.d
+   backup="$STATE_DIR/backups/ssh-$stamp"
+   install -d -m 0700 "$backup"
+   cp -a /etc/ssh/sshd_config "$backup/sshd_config"
+   [[ ! -f "$file" ]] || cp -a "$file" "$backup/dropin.conf"
+   # Existing configured ports MUST remain. sshd will read this file only if Include is configured.
+   { printf '%s\n' "$effective" | awk '{print "Port " $1}'; printf 'Port %s\n' "$SSH_TARGET_PORT"; } | sort -u > "$file.tmp"
+   mv "$file.tmp" "$file"
+   if ! /usr/sbin/sshd -t || ! /usr/sbin/sshd -T | awk '$1=="port"{print $2}' | grep -qx "$SSH_TARGET_PORT"; then
+     [[ ! -f "$backup/dropin.conf" ]] && rm -f "$file" || cp -a "$backup/dropin.conf" "$file"
+     die 'New port not active in sshd config; reverted drop-in'; return 1
+   fi
+   info "SSH_CONFIG_${SSH_TARGET_PORT}: STAGED"
+ fi
+ if ss -H -ltn '( sport = :2202 )' | grep -q LISTEN; then info 'LISTENER_2202: PASS'; else info 'LISTENER_2202: NOT ACTIVE / manual controlled activation required'; fi
+ info 'SSH_SOCKET: UNTOUCHED'; info 'SSH_SERVICE: UNTOUCHED'; info 'SSH_OLD_PORTS: PRESERVED'
+}
+ufw_status(){ head 'FIREWALL / READ ONLY'; command -v ufw >/dev/null && ufw status verbose || info 'UFW unavailable'; }
+ufw_ssh(){
+ root || return 1; command -v ufw >/dev/null || { die 'Install ufw first'; return 1; }
+ head 'PRECHECK / SSH PORTS'; local ports; ports=$(/usr/sbin/sshd -T | awk '$1=="port"{print $2}' | sort -nu)
+ printf '%s\n' "$ports"
+ confirm 'Добавить ALLOW TCP для всех SSH-портов из конфига? UFW не будет включён' || return 0
+ while read -r p; do [[ "$p" =~ ^[0-9]+$ ]] || continue; ufw allow "$p/tcp"; done <<< "$ports"
+ ufw allow "$SSH_TARGET_PORT/tcp"
+ head RESULT; info 'UFW SSH RULES: PASS / UFW enable unchanged'
+}
+# Dangerous policy is deliberately opt-in; disabling ICMP unreachables can break PMTUD.
+ufw_icmp(){
+ root || return 1; command -v iptables-restore >/dev/null || { die 'iptables-restore missing'; return 1; }
+ [[ -f /etc/ufw/before.rules ]] || { die '/etc/ufw/before.rules missing'; return 1; }
+ head 'SECURITY / ICMP RULES'; info 'WARNING: DROP destination-unreachable/time-exceeded may break PMTUD and network diagnostics.'
+ confirm 'Установить 10 DROP ICMP-правил (INPUT + FORWARD) как на скриншоте?' || { info CANCELLED; return; }
+ mkdir_state; local stamp tmp; stamp=$(date -u +%Y%m%dT%H%M%SZ); tmp=$(mktemp)
+ cp -a /etc/ufw/before.rules "$STATE_DIR/backups/before.rules.$stamp"
+ cp /etc/ufw/before.rules "$tmp"
+ python3 - "$tmp" <<'PY'
+import pathlib,re,sys
+p=pathlib.Path(sys.argv[1]); s=p.read_text()
+s=re.sub(r'^# BEGIN ROUTERFORGE ICMP DROP\n.*?^# END ROUTERFORGE ICMP DROP\n','',s,flags=re.M|re.S)
+s=re.sub(r'^# BEGIN VPS-BOOTSTRAP ICMP DROP\n.*?^# END VPS-BOOTSTRAP ICMP DROP\n','',s,flags=re.M|re.S)
+# Avoid accumulating duplicate rules in old files.
+for chain in ('ufw-before-input','ufw-before-forward'):
+    kinds=('destination-unreachable','time-exceeded','parameter-problem','echo-request','source-quench')
+    for kind in kinds:
+        s=re.sub(r'^-A '+chain+r' -p icmp --icmp-type '+kind+r' -j DROP\n','',s,flags=re.M)
+    marker=f'-A {chain} '
+    hit=re.search('^'+re.escape(marker),s,re.M)
+    if not hit: raise SystemExit('Missing UFW anchor: '+chain)
+    rules=''.join(f'-A {chain} -p icmp --icmp-type {k} -j DROP\n' for k in kinds)
+    s=s[:hit.start()]+'# BEGIN ROUTERFORGE ICMP DROP\n'+rules+'# END ROUTERFORGE ICMP DROP\n'+s[hit.start():]
+p.write_text(s)
+PY
+ if ! iptables-restore --test < "$tmp"; then rm -f "$tmp"; die 'UFW before.rules test failed'; return 1; fi
+ install -m 0640 "$tmp" /etc/ufw/before.rules; rm -f "$tmp"
+ if ufw status | grep -q '^Status: active'; then
+   info 'UFW ACTIVE: rules written; live reload requires separate approval.'
+   if confirm 'Применить правила командой ufw reload?'; then ufw reload; fi
+ else info 'UFW INACTIVE: rules staged only'; fi
+ head RESULT; info 'ICMP_RULES: 10 / STAGED'; info "BACKUP: $STATE_DIR/backups/before.rules.$stamp"
+}
+scanner_install(){
+ root || return 1; ubuntu || return 1
+ command -v curl >/dev/null && command -v python3 >/dev/null && command -v file >/dev/null || { die 'Requires curl, python3 and file; install packages first'; return 1; }
+ head 'SCANNER / INSTALL'; confirm 'Загрузить сканер XTLS/RealiTLScanner из GitHub Releases?' || return 0
+ mkdir_state; local tmp tag url name; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
+ python3 - "$tmp" <<'PY'
+import json,urllib.request,re,pathlib,sys
+folder=pathlib.Path(sys.argv[1]); req=urllib.request.Request('https://api.github.com/repos/XTLS/RealiTLScanner/releases/latest',headers={'User-Agent':'RouterForgeServer/0.1'})
+with urllib.request.urlopen(req,timeout=25) as resp: release=json.load(resp)
+assets=[a for a in release.get('assets',[]) if re.search(r'linux.*(amd64|x86_64|64)',a['name'],re.I) and not re.search(r'arm|checksum|sha256',a['name'],re.I)]
+if not assets: raise SystemExit('No supported Linux amd64 release asset')
+(folder/'url').write_text(assets[0]['browser_download_url']); (folder/'tag').write_text(release['tag_name'])
+PY
+ url=$(cat "$tmp/url"); tag=$(cat "$tmp/tag"); info "TAG: $tag"
+ curl -fsSL --retry 2 --connect-timeout 15 --max-time 180 "$url" -o "$tmp/archive"
+ if file "$tmp/archive" | grep -qi 'Zip archive'; then
+   command -v unzip >/dev/null || { die 'unzip required'; return 1; }
+   local entry; entry=$(unzip -Z1 "$tmp/archive" | grep -Ei '(^|/)realitlscanner$' | head -1)
+   [[ -n "$entry" ]] || { die 'Scanner executable missing in zip'; return 1; }
+   unzip -p "$tmp/archive" "$entry" > "$tmp/scanner"
+ elif file "$tmp/archive" | grep -qi 'gzip compressed'; then
+   local entry; entry=$(tar -tzf "$tmp/archive" | grep -Ei '(^|/)realitlscanner$' | head -1)
+   [[ -n "$entry" ]] || { die 'Scanner executable missing in tar'; return 1; }
+   tar -xOzf "$tmp/archive" "$entry" > "$tmp/scanner"
+ else cp "$tmp/archive" "$tmp/scanner"; fi
+ [[ "$(od -An -tx1 -N4 "$tmp/scanner" | tr -d ' \n')" == 7f454c46 ]] || { die 'Downloaded executable not ELF'; return 1; }
+ install -d -m 0755 "$APP_DIR/bin"; install -m 0755 "$tmp/scanner" "$APP_DIR/bin/RealiTLScanner"
+ printf '%s\n' "$tag" > "$APP_DIR/bin/scanner-version"
+ head RESULT; info "SCANNER_INSTALLED: $tag"
+}
+scanner_filter(){
+ local src=$1 output=$2
+ python3 - "$src" "$output" <<'PY'
+import sys,csv,pathlib
+src=pathlib.Path(sys.argv[1]); target=pathlib.Path(sys.argv[2]); cols=('IP','CERT_DOMAIN','CERT_ISSUER')
+with src.open(encoding='utf-8-sig',newline='') as f:
+  reader=csv.DictReader(f)
+  if not reader.fieldnames or any(c not in reader.fieldnames for c in cols):
+    raise SystemExit('Unexpected scanner CSV columns: '+str(reader.fieldnames))
+  records=set(); excluded=0
+  for row in reader:
+    record=tuple((row.get(c) or '').strip() for c in cols)
+    if 'let\'s encrypt' in record[2].casefold() or 'lets encrypt' in record[2].casefold(): excluded+=1; continue
+    if all(record): records.add(record)
+records=sorted(records)
+with target.open('w',encoding='utf-8',newline='') as f:
+  writer=csv.writer(f); writer.writerow(cols);writer.writerows(records)
+widths=[max([len(c)]+[len(r[i]) for r in records]) for i,c in enumerate(cols)]
+fmt='  '.join('{:<'+str(w)+'}' for w in widths)
+print(fmt.format(*cols));print(fmt.format(*('-'*w for w in widths)))
+for r in records: print(fmt.format(*r))
+print(f'RETAINED: {len(records)} / LETS_ENCRYPT_EXCLUDED: {excluded}')
+PY
+}
+public_ip(){ curl -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org; }
+scanner_run(){
+ root || return 1; [[ -x "$APP_DIR/bin/RealiTLScanner" ]] || { die 'Install scanner first'; return 1; }
+ command -v timeout >/dev/null || { die 'timeout missing'; return 1; }
+ mkdir_state; local ip cidr stamp report rc=0
+ head 'SCANNER / SCOPE'; ip=$(public_ip) || { die 'Cannot detect public IPv4'; return 1; }
+ cidr=$(python3 - "$ip" <<'PY'
+import ipaddress,sys
+p=ipaddress.ip_address(sys.argv[1].strip());assert p.version==4 and p.is_global,'not public IPv4'
+print(ipaddress.ip_network(f'{p}/24',strict=False))
+PY
+) || return 1
+ info "SOURCE_VPS_IP: $ip"; info "TARGET_NEIGHBORS: $cidr"; info 'NOTE: neighboring IPs can belong to other customers.'
+ confirm "Сканировать $cidr на TCP 443 (до ${SCAN_SECONDS}с, ${SCAN_THREADS} потока)? Убедись в разрешении провайдера" || { info CANCELLED; return; }
+ stamp=$(date -u +%Y%m%dT%H%M%SZ); report="$STATE_DIR/reports/$stamp"; install -d -m 0750 "$report"
+ timeout --signal=INT --kill-after=5 "${SCAN_SECONDS}s" "$APP_DIR/bin/RealiTLScanner" -addr "$cidr" -port 443 -thread "$SCAN_THREADS" -timeout 5 -out "$report/raw.csv" > "$report/scanner.log" 2>&1 || rc=$?
+ info "SCANNER_EXIT_CODE: $rc"
+ [[ -f "$report/raw.csv" ]] || { die "Scanner produced no CSV: $report/scanner.log"; return 1; }
+ scanner_filter "$report/raw.csv" "$report/filtered.csv" | tee "$report/summary.txt"
+ head RESULT; info "REPORT: $report"; info 'STATE: PASS / REPORT WRITTEN'
+}
+reports(){ head 'REPORTS'; if [[ -d "$STATE_DIR/reports" ]]; then find "$STATE_DIR/reports" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r | head -20; else info 'No reports'; fi; }
+menu(){
+ while :; do
+  printf '\nRouterForge Server %s\n' "$VERSION"
+  cat <<'TXT'
+  1) Статус VPS (без изменений)
+  2) Обновление Ubuntu
+  3) SSH: подготовить порт 2202 (без рестарта)
+  4) UFW: статус
+  5) UFW: разрешить текущие SSH-порты
+  6) UFW: ICMP DROP (опасные правила, подтверждение)
+  7) RealiTLScanner: установка
+  8) RealiTLScanner: соседи IPv4 /24 / 120 секунд
+  9) Отчёты
+  0) Выход
+TXT
+  local choice; read -r -p 'Выбор: ' choice || break
+  case "$choice" in
+   1) status || true;; 2) updates || true;; 3) ssh_prepare || true;;
+   4) ufw_status || true;; 5) ufw_ssh || true;; 6) ufw_icmp || true;;
+   7) scanner_install || true;; 8) scanner_run || true;; 9) reports || true;;
+   0) break;; *) info 'Неизвестный пункт';;
+  esac
+ done
+}
+help_text(){ cat <<'TXT'
+RouterForge Server
+Usage: vps-manager [menu|status|update|ssh-prepare|ufw-status|ufw-ssh|ufw-icmp|scanner-install|scan|reports|filter CSV OUTPUT]
+No root service is started automatically. No firewall activation or SSH restart.
+TXT
+}
+main(){
+ case "${1:-menu}" in
+ menu) menu;; status) status;; update) updates;; ssh-prepare) ssh_prepare;; ufw-status) ufw_status;; ufw-ssh) ufw_ssh;; ufw-icmp) ufw_icmp;;
+ scanner-install) scanner_install;; scan) scanner_run;; reports) reports;; filter) [[ $# == 3 ]] || { help_text; return 2; }; scanner_filter "$2" "$3";;
+ version|--version) echo "$VERSION";; help|--help|-h) help_text;; *) help_text; return 2;;
+ esac
+}
+main "$@"
