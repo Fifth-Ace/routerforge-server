@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RouterForge Server P4: colorful sectional TUI and opt-in third-party installers.
+# RouterForge Server P6: colorful sectional TUI and opt-in third-party installers.
 # This file is sourced by manager.sh, not executed directly.
 if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
   RFS_RESET=$'\033[0m'; RFS_BOLD=$'\033[1m'; RFS_BLUE=$'\033[36m'
@@ -10,48 +10,98 @@ fi
 rfs_line(){ printf '%s\n' '──────────────────────────────────────────────────'; }
 rfs_title(){ printf '\n%s%s%s\n' "$RFS_BLUE" "$1" "$RFS_RESET"; }
 rfs_option(){ printf ' %s[%s]%s %s\n' "$RFS_GREEN" "$1" "$RFS_RESET" "$2"; }
-rfs_pause(){ if [[ -t 0 ]]; then read -r -p 'Enter — продолжить...' _ || true; fi; }
-rfs_menu(){
- # Automatic version check once per menu launch. Read-only, no background updater.
- printf '\n%s%s RouterForge Server %s %s\n' "$RFS_BOLD" "$RFS_BLUE" "$VERSION" "$RFS_RESET"
- rfs_check_update
- while :; do
-  printf '\n%s%s RouterForge Server %s %s\n' "$RFS_BOLD" "$RFS_BLUE" "$VERSION" "$RFS_RESET"
-  rfs_line
-  rfs_title 'СИСТЕМА И ДИАГНОСТИКА'
-  rfs_option 1 'Состояние VPS'; rfs_option 2 'Обновить Ubuntu'
-  rfs_title 'SSH И ЗАЩИТА'
-  rfs_option 3 'Подготовить SSH: указать порт вручную (без рестарта)'
-  rfs_option 4 'Статус UFW'; rfs_option 5 'Разрешить действующие SSH-порты в UFW'
-  printf ' %s[6]%s ICMP DROP (опасно — отдельно подтверждается)\n' "$RFS_YELLOW" "$RFS_RESET"
-  rfs_title 'СКАНИРОВАНИЕ И ОТЧЁТЫ'
-  rfs_option 7 'Установить RealiTLScanner'; rfs_option 8 'Сканировать разрешённую сеть /24 (120 с)'
-  rfs_option 9 'Посмотреть отчёты'
-  rfs_title 'УСТАНОВКА СЕРВИСОВ'
-  rfs_option 11 'Классический 3x-ui (MHSanaei)'
-  rfs_option 12 'LucX-UI (AlexeyLCP)'
-  rfs_option 13 'RKN Guard (Flecksis)'
-  rfs_option 14 'MTProxyL (Liafanx)'
-  rfs_title 'ROUTERFORGE SERVER'
-  rfs_option 10 'Обновить RFS'; rfs_option 15 'Проверить обновления RFS'
-  rfs_option 0 'Выход'
-  rfs_line
-  local choice
-  read -r -p 'Выбор: ' choice || break
-  case "$choice" in
-   1) status || true;; 2) updates || true;; 3) ssh_prepare || true;;
-   4) ufw_status || true;; 5) ufw_ssh || true;; 6) ufw_icmp || true;;
-   7) scanner_install || true;; 8) scanner_run || true;; 9) reports || true;;
-   10) self_update || true;; 15) rfs_check_update || true;;
-   11) rfs_install_third_party 3x-ui || true;;
-   12) rfs_install_third_party lucx-ui || true;;
-   13) rfs_install_third_party rkn-guard || true;;
-   14) rfs_install_third_party mtproxyl || true;;
-   0) break;; *) info 'Неизвестный пункт';;
-  esac
-  rfs_pause
- done
+rfs_pause(){ if [[ -t 0 ]]; then read -r -p 'Enter — в меню...' _ || true; fi; }
+rfs_terminal_on(){
+ if [[ -t 0 && -t 1 && "${TERM:-dumb}" != dumb ]]; then
+   RFS_TUI_ACTIVE=1
+   printf '\033[?1049h\033[?25h'
+ else RFS_TUI_ACTIVE=0; fi
 }
+rfs_terminal_off(){
+ if [[ "${RFS_TUI_ACTIVE:-0}" == 1 ]]; then
+   printf '\033[0m\033[?25h\033[?1049l'
+ fi
+}
+rfs_redraw(){
+ if [[ "${RFS_TUI_ACTIVE:-0}" == 1 ]]; then printf '\033[H\033[2J'; fi
+ return 0
+}
+rfs_banner(){
+ # Compact 7-row pixel font with cyan highlights and a dark lower edge.
+ # Plain Unicode fallback works when NO_COLOR=1; no external font dependency.
+ local c_top c_mid c_low c_shadow
+ if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
+  c_top=$'\033[1;96m'; c_mid=$'\033[96m'; c_low=$'\033[36m'; c_shadow=$'\033[90m'
+ else
+  c_top=; c_mid=; c_low=; c_shadow=
+ fi
+ printf '%s%s%s\n' "$c_top" '  ████  █████     ████ █████ ████  █   █ █████ ████' "$RFS_RESET"
+ printf '%s%s%s\n' "$c_top" '  █   █ █        █     █     █   █ █   █ █     █   █' "$RFS_RESET"
+ printf '%s%s%s\n' "$c_mid" '  █   █ █        █     █     █   █ █   █ █     █   █' "$RFS_RESET"
+ printf '%s%s%s\n' "$c_mid" '  ████  ████      ███  ████  ████  █   █ ████  ████' "$RFS_RESET"
+ printf '%s%s%s\n' "$c_mid" '  █ █   █            █ █     █ █    █ █  █     █ █' "$RFS_RESET"
+ printf '%s%s%s\n' "$c_low" '  █  █  █            █ █     █  █   █ █  █     █  █' "$RFS_RESET"
+ printf '%s%s%s\n' "$c_low" '  █   █ █        ████  █████ █   █   █   █████ █   █' "$RFS_RESET"
+ printf '%s%s%s\n' "$c_shadow" '   ▀   ▀ ▀        ▀▀▀▀  ▀▀▀▀▀ ▀   ▀   ▀   ▀▀▀▀▀ ▀   ▀' "$RFS_RESET"
+ printf '  %sRouterForge Server%s  %s%s%s\n' "$RFS_BOLD" "$RFS_RESET" "$RFS_DIM" "$VERSION" "$RFS_RESET"
+}
+rfs_draw_menu(){
+ rfs_redraw
+ rfs_banner
+ rfs_line
+ [[ -z "${RFS_UPDATE_STATUS:-}" ]] || printf ' %s\n' "$RFS_UPDATE_STATUS"
+ rfs_title 'СИСТЕМА И ДИАГНОСТИКА'
+ rfs_option 1 'Состояние VPS'; rfs_option 2 'Обновить Ubuntu'
+ rfs_title 'SSH И ЗАЩИТА'
+ rfs_option 3 'Подготовить SSH: указать порт вручную (без рестарта)'
+ rfs_option 4 'Статус UFW'; rfs_option 5 'Разрешить действующие SSH-порты в UFW'
+ printf ' %s[6]%s ICMP DROP (опасно — отдельно подтверждается)\n' "$RFS_YELLOW" "$RFS_RESET"
+ rfs_title 'СКАНИРОВАНИЕ И ОТЧЁТЫ'
+ rfs_option 7 'Установить RealiTLScanner'; rfs_option 8 'Сканировать соседнюю сеть /24 (IP + время)'
+ rfs_option 9 'Посмотреть отчёты'
+ rfs_title 'УСТАНОВКА СЕРВИСОВ'
+ rfs_option 11 'Классический 3x-ui (MHSanaei)'
+ rfs_option 12 'LucX-UI (AlexeyLCP)'
+ rfs_option 13 'RKN Guard (Flecksis)'
+ rfs_option 14 'MTProxyL (Liafanx)'
+ rfs_title 'ROUTERFORGE SERVER'
+ rfs_option 10 'Обновить RFS'; rfs_option 15 'Проверить обновления RFS'
+ rfs_option 0 'Выход'
+ rfs_line
+}
+rfs_menu(){
+ # Subshell guarantees alternate-screen cleanup on normal exit and error.
+ (
+  trap 'rfs_terminal_off' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  rfs_terminal_on
+  local choice
+  RFS_UPDATE_STATUS=$(rfs_check_update 2>/dev/null | grep 'RFS_UPDATE:' | tail -1) || true
+  while :; do
+   rfs_draw_menu
+   read -r -p 'Выбор: ' choice || break
+   [[ "$choice" == 0 ]] && break
+   rfs_redraw
+   rfs_banner
+   rfs_line
+   case "$choice" in
+    1) status || true;; 2) updates || true;; 3) ssh_prepare || true;;
+    4) ufw_status || true;; 5) ufw_ssh || true;; 6) ufw_icmp || true;;
+    7) scanner_install || true;; 8) scanner_run || true;; 9) reports || true;;
+    10) self_update || true;;
+    15) rfs_check_update || true; RFS_UPDATE_STATUS=$(rfs_check_update 2>/dev/null | grep 'RFS_UPDATE:' | tail -1) || true;;
+    11) rfs_install_third_party 3x-ui || true;;
+    12) rfs_install_third_party lucx-ui || true;;
+    13) rfs_install_third_party rkn-guard || true;;
+    14) rfs_install_third_party mtproxyl || true;;
+    *) info 'Неизвестный пункт';;
+   esac
+   rfs_pause
+  done
+ )
+}
+
 rfs_install_third_party(){
  root || return 1
  local name=${1:-} url ref extra=() tmp sum

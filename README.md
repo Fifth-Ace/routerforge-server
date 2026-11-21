@@ -58,3 +58,12 @@ Do not paste arbitrary `curl | bash` commands to root. Clone the repository or d
 - SSH preparation prompts for a TCP port (1–65535). No port is preselected, and no SSH/socket restart or firewall change occurs automatically. Previously configured ports remain; activation needs a separate verified procedure.
 - Prompts use `Y/n`; Enter defaults to Yes. Always read the action description first.
 - LucX-UI is listed immediately after classic 3x-ui. Because both use x-ui paths and services, installation is blocked if either panel exists; migration requires a separate backup workflow. Installer source: `AlexeyLCP/lucx-ui`.
+
+## P6: multihomed TLS scan and refreshed TUI
+
+- Option 8 lists directly configured, globally routable IPv4 addresses from `ip -o -4 addr show scope global`. If one is present, it is selected automatically; if multiple exist, choose by number (Enter defaults to the first). No silently guessed egress IP on NAT-only VPS.
+- The selected IPv4 determines which adjacent `/24` is scanned; it **does not bind outbound connections** to that source IP. RealiTLScanner CLI has no source-address option. Check the VPS routing/policy before scanning if the source IP matters.
+- Time limit in seconds is prompted interactively; Enter = 120 seconds. Accepted range: 1–86400 seconds. Two scanner threads remain the default. Scope and limit saved in each report's `scope.txt`.
+- Interactive TTY menu uses an alternate terminal screen and redraws in place, restoring the prior screen on exit. Piped/non-TTY mode does not use terminal control codes. RF Server ASCII banner is original and intentionally distinct from MTProxyL artwork.
+
+The P6 banner uses built-in 7-row block letters “RF SERVER” with optional ANSI cyan shading and a subtle shadow; no figlet dependency.

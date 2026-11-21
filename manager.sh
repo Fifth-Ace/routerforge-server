@@ -169,26 +169,102 @@ print(f'RETAINED: {len(records)} / LETS_ENCRYPT_EXCLUDED: {excluded}')
 PY
 }
 public_ip(){ curl -4fsS --connect-timeout 5 --max-time 10 https://api.ipify.org; }
+# Only globally routable addresses configured on the VPS are offered.
+# The selection determines the target /24; RealiTLScanner has no source-IP bind flag.
+scanner_local_ips(){
+ command -v ip >/dev/null || { die 'iproute2 is required'; return 1; }
+ command -v python3 >/dev/null || { die 'python3 is required'; return 1; }
+ ip -o -4 addr show scope global | python3 -c '
+import sys,ipaddress
+seen=set()
+for line in sys.stdin:
+    cols=line.split()
+    if "inet" not in cols: continue
+    n=cols.index("inet")
+    if n+1>=len(cols): continue
+    try: addr=ipaddress.ip_interface(cols[n+1]).ip
+    except ValueError: continue
+    if addr.is_global and addr not in seen:
+        seen.add(addr)
+        print(addr)
+'
+}
+scanner_select_ip(){
+ local -a addresses=()
+ local ip answer count i
+ mapfile -t addresses < <(scanner_local_ips)
+ count=${#addresses[@]}
+ if (( count == 0 )); then
+   info 'PUBLIC_IPV4: no directly assigned public IPv4 detected.'
+   info 'NAT / routed-IP environments require manual verification; refusing to infer /24 from outbound IP.'
+   return 1
+ fi
+ if (( count == 1 )); then
+   SCAN_SELECTED_IP=${addresses[0]}
+   info "SELECTED_IPV4: $SCAN_SELECTED_IP (only public IPv4)"
+   return 0
+ fi
+ info 'Выберите привязанный к VPS публичный IPv4:'
+ for ((i=0;i<count;i++)); do printf '  [%d] %s\n' "$((i+1))" "${addresses[i]}"; done
+ while :; do
+   read -r -p "Номер IP [1], 0 — отмена: " answer || return 1
+   answer=${answer:-1}
+   [[ "$answer" == 0 ]] && { info 'CANCELLED'; return 1; }
+   if [[ "$answer" =~ ^[0-9]+$ ]] && (( 10#$answer >= 1 && 10#$answer <= count )); then
+     SCAN_SELECTED_IP=${addresses[10#$answer-1]}
+     info "SELECTED_IPV4: $SCAN_SELECTED_IP"
+     return 0
+   fi
+   info 'Укажите номер IP из списка.'
+ done
+}
+scanner_select_seconds(){
+ local answer
+ while :; do
+   read -r -p "Продолжительность сканирования в секундах [${SCAN_SECONDS}]: " answer || return 1
+   answer=${answer:-$SCAN_SECONDS}
+   if [[ "$answer" =~ ^[0-9]{1,5}$ ]] && ((10#$answer >= 1 && 10#$answer <= 86400)); then
+     SCAN_SELECTED_SECONDS=$((10#$answer))
+     return 0
+   fi
+   info 'Укажите целое число секунд от 1 до 86400.'
+ done
+}
 scanner_run(){
  root || return 1; [[ -x "$APP_DIR/bin/RealiTLScanner" ]] || { die 'Install scanner first'; return 1; }
  command -v timeout >/dev/null || { die 'timeout missing'; return 1; }
- mkdir_state; local ip cidr stamp report rc=0
- head 'SCANNER / SCOPE'; ip=$(public_ip) || { die 'Cannot detect public IPv4'; return 1; }
- cidr=$(python3 - "$ip" <<'PY'
+ local cidr stamp report rc=0 SCAN_SELECTED_IP= SCAN_SELECTED_SECONDS=
+ head 'SCANNER / SCOPE'
+ scanner_select_ip || { info 'SCANNER: CANCELLED / no network changes'; return 0; }
+ scanner_select_seconds || { info 'SCANNER: CANCELLED'; return 0; }
+ cidr=$(python3 - "$SCAN_SELECTED_IP" <<'PYIP'
 import ipaddress,sys
-p=ipaddress.ip_address(sys.argv[1].strip());assert p.version==4 and p.is_global,'not public IPv4'
+p=ipaddress.ip_address(sys.argv[1])
+assert p.version==4 and p.is_global,'not global IPv4'
 print(ipaddress.ip_network(f'{p}/24',strict=False))
-PY
-) || return 1
- info "SOURCE_VPS_IP: $ip"; info "TARGET_NEIGHBORS: $cidr"; info 'NOTE: neighboring IPs can belong to other customers.'
- confirm "Сканировать $cidr на TCP 443 (до ${SCAN_SECONDS}с, ${SCAN_THREADS} потока)? Убедись в разрешении провайдера" || { info CANCELLED; return; }
- stamp=$(date -u +%Y%m%dT%H%M%SZ); report="$STATE_DIR/reports/$stamp"; install -d -m 0750 "$report"
- timeout --signal=INT --kill-after=5 "${SCAN_SECONDS}s" "$APP_DIR/bin/RealiTLScanner" -addr "$cidr" -port 443 -thread "$SCAN_THREADS" -timeout 5 -out "$report/raw.csv" > "$report/scanner.log" 2>&1 || rc=$?
+PYIP
+) || { die 'Cannot calculate public IPv4 network'; return 1; }
+ info "SELECTED_VPS_IP: $SCAN_SELECTED_IP"
+ info "TARGET_NEIGHBORS: $cidr"
+ info "TIME_LIMIT: ${SCAN_SELECTED_SECONDS}s / THREADS: $SCAN_THREADS"
+ info 'ATTENTION: selected IP defines /24 scope, NOT outbound source IP.'
+ info 'Neighboring addresses may belong to other clients; provider permission is required.'
+ confirm "Запустить сканирование $cidr на TCP 443?" || { info CANCELLED; return 0; }
+ mkdir_state
+ stamp=$(date -u +%Y%m%dT%H%M%SZ)
+ report="$STATE_DIR/reports/${stamp}-${SCAN_SELECTED_IP//./-}"
+ install -d -m 0750 "$report"
+ printf 'selected_ip=%s\ntarget_cidr=%s\nscan_seconds=%s\n' "$SCAN_SELECTED_IP" "$cidr" "$SCAN_SELECTED_SECONDS" > "$report/scope.txt"
+ timeout --signal=INT --kill-after=5 "${SCAN_SELECTED_SECONDS}s" "$APP_DIR/bin/RealiTLScanner" -addr "$cidr" -port 443 -thread "$SCAN_THREADS" -timeout 5 -out "$report/raw.csv" > "$report/scanner.log" 2>&1 || rc=$?
  info "SCANNER_EXIT_CODE: $rc"
+ if [[ "$rc" != 0 && "$rc" != 124 && "$rc" != 130 ]]; then
+   info 'WARNING: scanner exited unexpectedly; see scanner.log'
+ fi
  [[ -f "$report/raw.csv" ]] || { die "Scanner produced no CSV: $report/scanner.log"; return 1; }
  scanner_filter "$report/raw.csv" "$report/filtered.csv" | tee "$report/summary.txt"
  head RESULT; info "REPORT: $report"; info 'STATE: PASS / REPORT WRITTEN'
 }
+
 rfs_check_update(){
  local channel local_sha remote_sha response
  channel=dev
