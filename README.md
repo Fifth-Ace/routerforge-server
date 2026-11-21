@@ -67,3 +67,10 @@ Do not paste arbitrary `curl | bash` commands to root. Clone the repository or d
 - Interactive TTY menu uses an alternate terminal screen and redraws in place, restoring the prior screen on exit. Piped/non-TTY mode does not use terminal control codes. RF Server ASCII banner is original and intentionally distinct from MTProxyL artwork.
 
 The P6 banner uses built-in 7-row block letters “RF SERVER” with optional ANSI cyan shading and a subtle shadow; no figlet dependency.
+
+## P7: automatic update comparison
+
+- On menu startup and every five minutes while an interactive TTY menu is idle, checks `dev`/`main` read-only. A manual check (option 15 / `rfs check-update`) is also available. No background daemon.
+- Shows `Установлена: 0.1.0-dev (local SHA) → Доступна: 0.1.0-dev (remote SHA)` with green *current* or yellow *update available*. Dev builds share the same semantic version and must be distinguished by commit.
+- For a differing commit, the remote VERSION is fetched from `manager.sh` pinned to that exact commit. If the version file is unavailable, it shows the remote revision without inventing a version.
+- Network failure is displayed as unavailable, not as current. Update installation always requires explicit confirmation.

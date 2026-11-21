@@ -265,30 +265,75 @@ PYIP
  head RESULT; info "REPORT: $report"; info 'STATE: PASS / REPORT WRITTEN'
 }
 
-rfs_check_update(){
- local channel local_sha remote_sha response
+# Read-only update probe. A semantic version alone cannot distinguish dev builds:
+# show both VERSION and the exact installed/available commit identifiers.
+rfs_update_probe(){
+ local channel local_sha remote_sha response raw remote_version
+ RFS_UPDATE_STATE=unavailable
+ RFS_UPDATE_LOCAL_VERSION="$VERSION"
+ RFS_UPDATE_REMOTE_VERSION='unknown'
+ RFS_UPDATE_LOCAL_SHA='local'
+ RFS_UPDATE_REMOTE_SHA='unknown'
  channel=dev
  [[ -r "$APP_DIR/channel" ]] && channel=$(cat "$APP_DIR/channel")
- [[ "$channel" == dev || "$channel" == main ]] || { info 'RFS_UPDATE: UNKNOWN_CHANNEL'; return 0; }
- local_sha=local
- [[ -r "$APP_DIR/revision" ]] && local_sha=$(cat "$APP_DIR/revision")
- if ! command -v curl >/dev/null || ! command -v python3 >/dev/null; then
-   info 'RFS_UPDATE: CHECK_UNAVAILABLE / dependencies missing'; return 0
- fi
+ RFS_UPDATE_CHANNEL="$channel"
+ [[ -r "$APP_DIR/revision" ]] && RFS_UPDATE_LOCAL_SHA=$(cat "$APP_DIR/revision")
+ [[ "$channel" == dev || "$channel" == main ]] || return 0
+ command -v curl >/dev/null && command -v python3 >/dev/null || return 0
  response=$(curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 3 --max-time 8 \
    -H 'Accept: application/vnd.github+json' -H 'User-Agent: RouterForge-Server' \
-   "https://api.github.com/repos/Fifth-Ace/routerforge-server/commits/$channel" 2>/dev/null) || {
-     info 'RFS_UPDATE: OFFLINE / check skipped'; return 0;
-   }
- remote_sha=$(printf '%s' "$response" | python3 -c 'import json,sys,re; s=json.load(sys.stdin).get("sha",""); print(s if re.fullmatch("[a-f0-9]{40}",s) else "")' 2>/dev/null) || true
- [[ "$remote_sha" =~ ^[a-f0-9]{40}$ ]] || { info 'RFS_UPDATE: INVALID_RESPONSE'; return 0; }
- if [[ "$local_sha" == "$remote_sha" ]]; then
-   info "RFS_UPDATE: CURRENT / $channel / ${local_sha:0:12}"
+   "https://api.github.com/repos/Fifth-Ace/routerforge-server/commits/$channel" 2>/dev/null) || return 0
+ remote_sha=$(printf '%s' "$response" | python3 -c 'import json,sys,re; s=json.load(sys.stdin).get("sha",""); print(s if re.fullmatch("[a-f0-9]{40}",s) else "")' 2>/dev/null) || return 0
+ [[ "$remote_sha" =~ ^[a-f0-9]{40}$ ]] || return 0
+ RFS_UPDATE_REMOTE_SHA=$remote_sha
+ if [[ "$RFS_UPDATE_LOCAL_SHA" == "$remote_sha" ]]; then
+   RFS_UPDATE_REMOTE_VERSION="$VERSION"
+   RFS_UPDATE_STATE=current
  else
-   info "RFS_UPDATE: AVAILABLE / $channel / ${local_sha:0:12} -> ${remote_sha:0:12}"
-   info 'Обновление доступно: пункт 10 или rfs self-update (после подтверждения).'
+   # Resolve the version string from the exact pinned commit. If this second
+   # request fails, do not pretend the remote release has the local version.
+   raw=$(curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 3 --max-time 6 \
+     "https://raw.githubusercontent.com/Fifth-Ace/routerforge-server/$remote_sha/manager.sh" 2>/dev/null) || raw=
+   remote_version=$(printf '%s\n' "$raw" | sed -nE 's/^VERSION=([0-9A-Za-z.+_-]+)$/\1/p' | sed -n '1p')
+   [[ -z "$remote_version" ]] || RFS_UPDATE_REMOTE_VERSION="$remote_version"
+   RFS_UPDATE_STATE=available
+ fi
+ return 0
+}
+rfs_update_version_label(){
+ local version=$1 sha=$2
+ if [[ "$sha" =~ ^[a-f0-9]{40}$ ]]; then
+   if [[ "$version" == unknown ]]; then
+     printf 'ревизия %s' "${sha:0:12}"
+   else
+     printf '%s (%s)' "$version" "${sha:0:12}"
+   fi
+ else
+   printf '%s (%s)' "$version" "$sha"
  fi
 }
+rfs_update_status_text(){
+ local installed available
+ installed=$(rfs_update_version_label "$RFS_UPDATE_LOCAL_VERSION" "$RFS_UPDATE_LOCAL_SHA")
+ if [[ "$RFS_UPDATE_STATE" == unavailable ]]; then
+   printf 'Установлена: %s  |  Проверка обновлений недоступна' "$installed"
+   return
+ fi
+ available=$(rfs_update_version_label "$RFS_UPDATE_REMOTE_VERSION" "$RFS_UPDATE_REMOTE_SHA")
+ if [[ "$RFS_UPDATE_STATE" == current ]]; then
+   printf 'Установлена: %s  →  Доступна: %s  [АКТУАЛЬНО]' "$installed" "$available"
+ else
+   printf 'Установлена: %s  →  Доступна: %s  [ОБНОВЛЕНИЕ]' "$installed" "$available"
+ fi
+}
+rfs_check_update(){
+ rfs_update_probe
+ printf '%s\n' "$(rfs_update_status_text)"
+ if [[ "$RFS_UPDATE_STATE" == available ]]; then
+   info 'Новая версия доступна: пункт 10 или rfs self-update.'
+ fi
+}
+
 self_update(){
  root || return 1
  local channel

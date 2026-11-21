@@ -61,3 +61,55 @@ grep -q '█████' <<< "$source_text"
 grep -q 'RouterForge Server' <<< "$source_text"
 ! grep -q '___) |' <<< "$source_text"
 printf 'P6_BLOCK_BANNER: PASS\n'
+
+# P7: show the installed vs remote revision accurately, even when semver is equal.
+head -n -1 manager.sh > "$D/manager-lib-p7.sh"
+result=$(bash -c '
+  source "$1"
+  APP_DIR="$2"
+  mkdir -p "$APP_DIR"
+  printf "dev\n" > "$APP_DIR/channel"
+  printf "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" > "$APP_DIR/revision"
+  curl(){
+    case "$*" in
+      *api.github.com*) printf "{\"sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}" ;;
+      *raw.githubusercontent.com*) printf "#!/bin/bash\nVERSION=0.1.1-dev\n" ;;
+    esac
+  }
+  rfs_update_probe
+  rfs_update_status_text
+  printf "\nSTATE=%s\n" "$RFS_UPDATE_STATE"
+' _ "$D/manager-lib-p7.sh" "$D/version-state")
+grep -q 'Установлена: 0.1.0-dev (aaaaaaaaaaaa)' <<< "$result"
+grep -q 'Доступна: 0.1.1-dev (bbbbbbbbbbbb)' <<< "$result"
+grep -q 'STATE=available' <<< "$result"
+result=$(bash -c '
+  source "$1"
+  APP_DIR="$2"
+  curl(){ printf "{\"sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"; }
+  rfs_update_probe
+  rfs_update_status_text
+  printf "\nSTATE=%s\n" "$RFS_UPDATE_STATE"
+' _ "$D/manager-lib-p7.sh" "$D/version-state")
+grep -q 'АКТУАЛЬНО' <<< "$result"
+grep -q 'STATE=current' <<< "$result"
+result=$(bash -c '
+  source "$1"
+  APP_DIR="$2"
+  curl(){ return 6; }
+  rfs_update_probe
+  rfs_update_status_text
+  printf "\nSTATE=%s\n" "$RFS_UPDATE_STATE"
+' _ "$D/manager-lib-p7.sh" "$D/version-state")
+grep -q 'Проверка обновлений недоступна' <<< "$result"
+grep -q 'STATE=unavailable' <<< "$result"
+grep -q 'rfs_update_refresh' ui.sh
+grep -q 'read -r -t 30' ui.sh
+printf 'P7_VERSION_COMPARE: PASS\n'
+
+# P7v2: Enter alone must exit the main menu (non-TTY smoke).
+main_output=$(printf '\n' | NO_COLOR=1 bash manager.sh menu)
+[[ $(grep -c 'RouterForge Server' <<< "$main_output") -ge 1 ]]
+! grep -q 'Неизвестный пункт' <<< "$main_output"
+grep -q 'choice=${choice:-0}' ui.sh
+printf 'P7_DEFAULT_EXIT: PASS\n'

@@ -49,7 +49,7 @@ rfs_draw_menu(){
  rfs_redraw
  rfs_banner
  rfs_line
- [[ -z "${RFS_UPDATE_STATUS:-}" ]] || printf ' %s\n' "$RFS_UPDATE_STATUS"
+ rfs_update_display
  rfs_title 'СИСТЕМА И ДИАГНОСТИКА'
  rfs_option 1 'Состояние VPS'; rfs_option 2 'Обновить Ubuntu'
  rfs_title 'SSH И ЗАЩИТА'
@@ -69,18 +69,56 @@ rfs_draw_menu(){
  rfs_option 0 'Выход'
  rfs_line
 }
+rfs_update_refresh(){
+ # Cache the last check for five minutes, unless manually forced.
+ local force=${1:-0} now
+ now=$(date +%s)
+ if [[ "$force" == 1 || -z "${RFS_UPDATE_LAST_CHECK:-}" ]] ||
+    (( now - RFS_UPDATE_LAST_CHECK >= 300 )); then
+   rfs_update_probe
+   RFS_UPDATE_LAST_CHECK=$now
+ fi
+}
+rfs_update_display(){
+ local line state_color=
+ line=$(rfs_update_status_text)
+ case "${RFS_UPDATE_STATE:-unavailable}" in
+  available) state_color="$RFS_YELLOW" ;;
+  current) state_color="$RFS_GREEN" ;;
+  *) state_color="$RFS_DIM" ;;
+ esac
+ printf ' %s%s%s\n' "$state_color" "$line" "$RFS_RESET"
+}
 rfs_menu(){
- # Subshell guarantees alternate-screen cleanup on normal exit and error.
+ # Read-only check on entry and every five minutes while waiting for input.
+ # No background worker, no automatic installation or service changes.
  (
   trap 'rfs_terminal_off' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   rfs_terminal_on
-  local choice
-  RFS_UPDATE_STATUS=$(rfs_check_update 2>/dev/null | grep 'RFS_UPDATE:' | tail -1) || true
+  local choice rc
+  rfs_update_refresh 1
   while :; do
+   rfs_update_refresh
    rfs_draw_menu
-   read -r -p 'Выбор: ' choice || break
+   if [[ "${RFS_TUI_ACTIVE:-0}" == 1 ]]; then
+     if read -r -t 30 -p 'Выбор [0 — выход]: ' choice; then
+       rc=0
+     else
+       rc=$?
+     fi
+   else
+     read -r -p 'Выбор [0 — выход]: ' choice || break
+     rc=0
+   fi
+   if [[ "${RFS_TUI_ACTIVE:-0}" == 1 && "$rc" != 0 ]]; then
+     # Bash uses statuses >128 for timeout, 1 for EOF/disconnected input.
+     if (( rc > 128 )); then continue; fi
+     break
+   fi
+   # Empty Enter exits the main menu; timeout/EOF above never implies selection.
+   choice=${choice:-0}
    [[ "$choice" == 0 ]] && break
    rfs_redraw
    rfs_banner
@@ -90,7 +128,7 @@ rfs_menu(){
     4) ufw_status || true;; 5) ufw_ssh || true;; 6) ufw_icmp || true;;
     7) scanner_install || true;; 8) scanner_run || true;; 9) reports || true;;
     10) self_update || true;;
-    15) rfs_check_update || true; RFS_UPDATE_STATUS=$(rfs_check_update 2>/dev/null | grep 'RFS_UPDATE:' | tail -1) || true;;
+    15) rfs_update_refresh 1; rfs_update_display;;
     11) rfs_install_third_party 3x-ui || true;;
     12) rfs_install_third_party lucx-ui || true;;
     13) rfs_install_third_party rkn-guard || true;;
